@@ -21,7 +21,7 @@ int main() {
 
     std::cout << "Pamięć dzielona IPC utworzona i zainicjalizowana." << std::endl;
 
-    // Odłączamy się na koniec (pamięć zostaje w systemie)
+    // Odłączamy się na koniec
     shmdt(bus);
 
     return 0;
