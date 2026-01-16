@@ -3,6 +3,9 @@
 
 #include <sys/types.h>
 
+// Klucz dla pamięci dzielonej (musi być unikalny w systemie)
+#define SHM_KEY 123456
+
 // Typy pasażerów
 typedef enum {
     REGULAR,
@@ -11,18 +14,19 @@ typedef enum {
     CHILD_WITH_GUARDIAN
 } PassengerType;
 
-// Struktura opisująca pasażera w systemie
 typedef struct {
     pid_t pid;
     PassengerType type;
     int has_ticket;
 } Passenger;
 
-// Struktura stanu autobusu w pamięci dzielonej (IPC)
 typedef struct {
     int current_passengers;
     int current_bikes;
-    int is_at_station; // 1 jeśli stoi na dworcu, 0 jeśli w trasie
+    int is_at_station;
 } BusState;
+
+// Deklaracja funkcji narzędziowej (użyjemy jej w main)
+void check_error(int result, const char* msg);
 
 #endif
