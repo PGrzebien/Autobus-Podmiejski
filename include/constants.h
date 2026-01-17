@@ -5,14 +5,19 @@
 
 // Klucze IPC
 #define SHM_KEY 123456
+#define SEM_KEY 654321
+
+// Indeksy semaforów w zestawie
+#define SEM_MUTEX 0    // Chroni dostęp do pamięci dzielonej (BusState)
+#define SEM_DOOR_1 1   // Symuluje pierwsze wejście
+#define SEM_DOOR_2 2   // Symuluje drugie wejście
 
 // Parametry symulacji
-#define N_BUSES 3         // Liczba autobusów (N)
-#define P_CAPACITY 15     // Ogólna pojemność autobusu (P)
-#define R_BIKES 5         // Limit miejsc na rowery (R)
-#define T_WAIT 10         // Czas oczekiwania na przystanku (T)
+#define N_BUSES 3
+#define P_CAPACITY 15
+#define R_BIKES 5
+#define T_WAIT 10
 
-// Typy pasażerów
 typedef enum {
     REGULAR,
     BIKER,
@@ -32,7 +37,6 @@ typedef struct {
     int is_at_station;
 } BusState;
 
-// Deklaracja funkcji narzędziowej
 void check_error(int result, const char* msg);
 
 #endif
