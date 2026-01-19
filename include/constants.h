@@ -38,5 +38,6 @@ typedef struct {
 } BusState;
 
 void check_error(int result, const char* msg);
-
+void semaphore_p(int semid, int sem_num);
+void semaphore_v(int semid, int sem_num);
 #endif
