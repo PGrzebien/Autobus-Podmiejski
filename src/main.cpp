@@ -49,8 +49,10 @@ void cleanup(int sig) {
 void run_bus() {
     std::cout << "[Autobus] Startuję (PID: " << getpid() << ")" << std::endl;
     while (true) {
-        // Tu docelowo będzie sekcja krytyczna chroniona semaforem
+        semaphore_p(semid, SEM_MUTEX); // WEJŚCIE DO SEKCJI KRYTYCZNEJ
         std::cout << "[Autobus] Stan: " << bus->current_passengers << "/" << P_CAPACITY << " pasażerów." << std::endl;
+        semaphore_v(semid, SEM_MUTEX); // WYJŚCIE Z SEKCJI KRYTYCZNEJ
+        
         sleep(5);
     }
 }
@@ -60,11 +62,13 @@ void run_generator() {
     srand(time(NULL) ^ (getpid() << 16));
     while (true) {
         sleep(rand() % 4 + 1);
+        
+        semaphore_p(semid, SEM_MUTEX); // BLOKUJEMY DOSTĘP DO PAMIĘCI
         if (bus->current_passengers < P_CAPACITY) {
-            // Tu docelowo będzie sekcja krytyczna chroniona semaforem
             bus->current_passengers++;
             std::cout << "[Generator] Nowy pasażer. Kolejka: " << bus->current_passengers << std::endl;
         }
+        semaphore_v(semid, SEM_MUTEX); // ZWALNIAMY BLOKADĘ
     }
 }
 
