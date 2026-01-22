@@ -74,6 +74,20 @@ void run_generator() {
 
         semaphore_p(semid, SEM_MUTEX);
 
+        // 1. Sprawdzanie biletu
+        if (!has_ticket) {
+            log_action("[Kontrola] Odmowa: %s brak biletu!", type_names[type]);
+            semaphore_v(semid, SEM_MUTEX); // Zwalniamy semafor przed wyjściem!
+            continue;
+        }
+
+        // 2. Sprawdzanie opieki dla dziecka (10% szans, że jest samo)
+        if (type == CHILD_WITH_GUARDIAN && (rand() % 100 > 90)) {
+            log_action("[Kontrola] Odmowa: Dziecko bez opiekuna!");
+            semaphore_v(semid, SEM_MUTEX);
+            continue;
+        }
+
         // Logika wejścia
         bool can_enter = false;
 
@@ -97,10 +111,13 @@ void run_generator() {
         }
 
         if (can_enter) {
-            log_action("[Generator] Wsiadl: %s (Bilet: %d). Stan: %d/%d (Rowery: %d/%d)", 
-                       type_names[type], has_ticket, 
-                       bus->current_passengers, P_CAPACITY,
-                       bus->current_bikes, R_BIKES);
+            if (type == VIP) {
+                 log_action("[VIP] Wejscie priorytetowe! Stan: %d/%d", bus->current_passengers, P_CAPACITY);
+            } else {
+                 log_action("[Wejscie] %s. Stan: %d/%d (Rowery: %d/%d)", 
+                           type_names[type], bus->current_passengers, P_CAPACITY,
+                           bus->current_bikes, R_BIKES);
+            }
         }
 
         semaphore_v(semid, SEM_MUTEX);
