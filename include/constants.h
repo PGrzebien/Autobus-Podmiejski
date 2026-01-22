@@ -17,7 +17,7 @@
 #define P_CAPACITY 15
 #define R_BIKES 5
 #define T_WAIT 10
-
+#define LOG_FILE "symulacja.txt"
 typedef enum {
     REGULAR,
     BIKER,
@@ -35,9 +35,11 @@ typedef struct {
     int current_passengers;
     int current_bikes;
     int is_at_station;
+    int total_travels;      // Licznik wykonanych kursów
 } BusState;
 
 void check_error(int result, const char* msg);
 void semaphore_p(int semid, int sem_num);
 void semaphore_v(int semid, int sem_num);
+void log_action(const char* format, ...);
 #endif

@@ -47,28 +47,63 @@ void cleanup(int sig) {
 }
 
 void run_bus() {
-    std::cout << "[Autobus] Startuję (PID: " << getpid() << ")" << std::endl;
+    log_action("[Autobus] Start serwisu (PID: %d)", getpid());
     while (true) {
-        semaphore_p(semid, SEM_MUTEX); // WEJŚCIE DO SEKCJI KRYTYCZNEJ
-        std::cout << "[Autobus] Stan: " << bus->current_passengers << "/" << P_CAPACITY << " pasażerów." << std::endl;
-        semaphore_v(semid, SEM_MUTEX); // WYJŚCIE Z SEKCJI KRYTYCZNEJ
-        
+        semaphore_p(semid, SEM_MUTEX);
+        log_action("[Autobus] Stan: %d/%d pasazerow (w tym %d/%d rowerow)", 
+                   bus->current_passengers, P_CAPACITY, 
+                   bus->current_bikes, R_BIKES);
+        semaphore_v(semid, SEM_MUTEX);
+
         sleep(5);
     }
 }
 
 void run_generator() {
-    std::cout << "[Generator] Startuję (PID: " << getpid() << ")" << std::endl;
+    log_action("[Generator] Start procesu generowania (PID: %d)", getpid());
     srand(time(NULL) ^ (getpid() << 16));
+
+    const char* type_names[] = {"NORMALNY", "ROWERZYSTA", "VIP", "DZIECKO"};
+
     while (true) {
-        sleep(rand() % 4 + 1);
-        
-        semaphore_p(semid, SEM_MUTEX); // BLOKUJEMY DOSTĘP DO PAMIĘCI
+        sleep(rand() % 3 + 1); // Losowy odstęp 1-3s
+
+        // Losowanie typu pasażera
+        PassengerType type = static_cast<PassengerType>(rand() % 4);
+        int has_ticket = (rand() % 100 < 80); // 80% ma bilet
+
+        semaphore_p(semid, SEM_MUTEX);
+
+        // Logika wejścia
+        bool can_enter = false;
+
         if (bus->current_passengers < P_CAPACITY) {
-            bus->current_passengers++;
-            std::cout << "[Generator] Nowy pasażer. Kolejka: " << bus->current_passengers << std::endl;
+            if (type == BIKER) {
+                // Rowerzysta musi mieć miejsce na rower ORAZ miejsce w autobusie
+                if (bus->current_bikes < R_BIKES) {
+                    bus->current_bikes++;
+                    bus->current_passengers++;
+                    can_enter = true;
+                } else {
+                    log_action("[Generator] Odmowa: Brak miejsc na rowery (Limit: %d)", R_BIKES);
+                }
+            } else {
+                // Pozostali pasażerowie
+                bus->current_passengers++;
+                can_enter = true;
+            }
+        } else {
+            log_action("[Generator] Odmowa: Autobus pelny (%d/%d)", P_CAPACITY, P_CAPACITY);
         }
-        semaphore_v(semid, SEM_MUTEX); // ZWALNIAMY BLOKADĘ
+
+        if (can_enter) {
+            log_action("[Generator] Wsiadl: %s (Bilet: %d). Stan: %d/%d (Rowery: %d/%d)", 
+                       type_names[type], has_ticket, 
+                       bus->current_passengers, P_CAPACITY,
+                       bus->current_bikes, R_BIKES);
+        }
+
+        semaphore_v(semid, SEM_MUTEX);
     }
 }
 
