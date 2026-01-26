@@ -36,6 +36,7 @@ typedef struct {
     int current_bikes;
     int is_at_station;
     int total_travels;      // Licznik wykonanych kursów
+    int is_station_open;   //(1=otwarte, 0=zamknięte)
 } BusState;
 
 void check_error(int result, const char* msg);

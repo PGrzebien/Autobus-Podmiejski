@@ -69,6 +69,24 @@ void handle_departure(int sig) {
     semaphore_v(semid, SEM_MUTEX); // Zwalniamy semafor
 }
 
+// Handler dla SIGUSR2 - Zamykanie/Otwieranie dworca
+void handle_station_toggle(int sig) {
+    if (bus == nullptr) return;
+
+    semaphore_p(semid, SEM_MUTEX);
+    
+    // Przełączenie stanu (1->0 lub 0->1)
+    bus->is_station_open = !bus->is_station_open;
+    
+    if (bus->is_station_open) {
+        log_action("[Dyspozytor] Dworzec zostal OTWARTY. Wznawiam ruch.");
+    } else {
+        log_action("[Dyspozytor] Dworzec zostal ZAMKNIETY (Sygnal 2). Zakaz wstepu.");
+    }
+
+    semaphore_v(semid, SEM_MUTEX);
+}
+
 void run_bus() {
     log_action("[Autobus] Start serwisu (PID: %d)", getpid());
     signal(SIGUSR1, handle_departure); // Rejestracja sygnału odjazdu
@@ -84,6 +102,7 @@ void run_bus() {
 }
 
 void run_generator() {
+    signal(SIGUSR2, handle_station_toggle); // Rejestracja blokady
     log_action("[Generator] Start procesu generowania (PID: %d)", getpid());
     srand(time(NULL) ^ (getpid() << 16));
 
@@ -97,6 +116,13 @@ void run_generator() {
         int has_ticket = (rand() % 100 < 80); // 80% ma bilet
 
         semaphore_p(semid, SEM_MUTEX);
+        
+        // 0. SPRAWDZENIE BLOKADY DWORCA (Sygnał 2)
+        if (!bus->is_station_open) {
+            // Jeśli zamknięte, zwalniamy semafor i próbujemy za chwilę
+            semaphore_v(semid, SEM_MUTEX);
+            continue; 
+        }
 
         // 1. Sprawdzanie biletu
         if (!has_ticket) {
@@ -177,7 +203,7 @@ int main() {
     bus->current_passengers = 0;
     bus->current_bikes = 0;
     bus->is_at_station = 1;
-
+    bus->is_station_open = 1;
     std::cout << "[Dyspozytor] Semafory zainicjalizowane wartością 1." << std::endl;
 
     bus_pid = fork();
