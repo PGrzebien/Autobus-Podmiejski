@@ -46,8 +46,32 @@ void cleanup(int sig) {
     exit(0);
 }
 
+// Handler sygnału SIGUSR1 - Obsługa wymuszonego odjazdu
+void handle_departure(int sig) {
+    if (bus == nullptr) return;
+
+    semaphore_p(semid, SEM_MUTEX); // Wchodzimy do sekcji krytycznej
+
+    log_action("[Kierowca] Otrzymano sygnal odjazdu! Ruszamy z %d pasazerami.", bus->current_passengers);
+
+    // Symulacja trwania kursu
+    bus->is_at_station = 0;
+    sleep(2); // Czas podróży
+
+    // Reset stanu po powrocie na pętlę
+    bus->total_travels++;
+    bus->current_passengers = 0;
+    bus->current_bikes = 0;
+    bus->is_at_station = 1;
+
+    log_action("[Kierowca] Powrot na stacje (Kurs nr: %d). Gotowy na pasazerow.", bus->total_travels);
+
+    semaphore_v(semid, SEM_MUTEX); // Zwalniamy semafor
+}
+
 void run_bus() {
     log_action("[Autobus] Start serwisu (PID: %d)", getpid());
+    signal(SIGUSR1, handle_departure); // Rejestracja sygnału odjazdu
     while (true) {
         semaphore_p(semid, SEM_MUTEX);
         log_action("[Autobus] Stan: %d/%d pasazerow (w tym %d/%d rowerow)", 
