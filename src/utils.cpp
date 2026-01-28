@@ -6,7 +6,8 @@
 #include <stdarg.h>
 #include <string.h>
 #include <time.h>
-#include "constants.h"
+#include "../include/common.h"
+#include "../include/utils.h"
 
 void check_error(int result, const char* msg) {
     if (result == -1) {
