@@ -78,7 +78,7 @@ int main() {
     // 2. Rejestracja sygnałów
     signal(SIGUSR1, handle_signal);
 
-while (true) {
+while (bus->total_travels < N_BUSES) {
         // 1. Podjazd na stanowisko
         semaphore_p(semid, SEM_MUTEX);
         bus->is_at_station = 1;
@@ -114,7 +114,8 @@ while (true) {
 
         sleep(3); // Symulacja jazdy (powrót na pętlę)
     }    
-
+  
+    log_action("[System] Koniec zmiany. Wykorzystano limit %d autobusów.", N_BUSES);
 
     // Sprzątanie przy wyjściu
     shmdt(bus);
