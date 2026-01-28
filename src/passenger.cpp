@@ -40,8 +40,22 @@ void buy_ticket(PassengerType type, pid_t pid) {
     }
 }
 
+// Logika Dziecka - 10% szans, że zgubiło opiekuna
+bool check_guardian(pid_t pid) {
+    if (rand() % 100 < 10) {
+        log_action("[Kontrola] Dziecko %d bez opiekuna! Odmowa wstępu.", pid);
+        return false;
+    }
+    return true;
+}
+
 // Funkcja próbująca wejść do autobusu
 void board_bus(PassengerType type, pid_t pid) {
+    // 0. Dziecko musi mieć opiekuna
+    if (type == CHILD_WITH_GUARDIAN) {
+        if (!check_guardian(pid)) return; // Rezygnacja
+    }
+
     // 1. Sprawdź czy dworzec otwarty
     semaphore_p(semid, SEM_MUTEX);
     if (!bus->is_station_open) {
@@ -51,22 +65,40 @@ void board_bus(PassengerType type, pid_t pid) {
     }
     semaphore_v(semid, SEM_MUTEX);
 
-    // 2. Wybierz drzwi (1 = Zwykłe, 2 = Rowerowe)
+    // 2. Wybierz drzwi
     int door_sem = (type == BIKER) ? SEM_DOOR_2 : SEM_DOOR_1;
-    
     log_action("[Pasażer %d] Czekam na otwarcie drzwi %d...", pid, door_sem == SEM_DOOR_1 ? 1 : 2);
 
-    // 3. Czekaj na wejście
+    // 3. Czekaj na wejście (Tu proces stoi w kolejce)
     semaphore_p(semid, door_sem);
 
-    // 4. Wsiadłem - aktualizuj stan
+    // 4. Wsiadanie - KRYTYCZNE SPRAWDZENIE MIEJSCA
     semaphore_p(semid, SEM_MUTEX);
-    bus->current_passengers++;
-    if (type == BIKER) bus->current_bikes++;
     
-    log_action("[Pasażer %d] WSIADŁEM! (Stan: %d/%d, Rowery: %d/%d)", 
-               pid, bus->current_passengers, P_CAPACITY, bus->current_bikes, R_BIKES);
+    bool can_enter = true;
+    
+    // Sprawdzamy, czy wchodząc nie przekroczymy limitu
+    if (bus->current_passengers >= P_CAPACITY) {
+        log_action("[Pasażer %d] Autobus pełny! (%d/%d). Rezygnuję.", pid, bus->current_passengers, P_CAPACITY);
+        can_enter = false;
+    } 
+    else if (type == BIKER && bus->current_bikes >= R_BIKES) {
+        log_action("[Pasażer %d] Brak miejsca na rower! (%d/%d). Rezygnuję.", pid, bus->current_bikes, R_BIKES);
+        can_enter = false;
+    }
+
+    if (can_enter) {
+        bus->current_passengers++;
+        if (type == BIKER) bus->current_bikes++;
+        
+        log_action("[Wejście] %d wchodzi. Stan: %d/%d (R: %d/%d)", 
+                   pid, bus->current_passengers, P_CAPACITY, bus->current_bikes, R_BIKES);
+    }
+
     semaphore_v(semid, SEM_MUTEX);
+    
+    // Jeśli nie udało się wejść, proces musi zniknąć
+    if (!can_enter) exit(0);
 }
 
 int main(int argc, char* argv[]) {
