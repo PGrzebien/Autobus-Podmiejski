@@ -40,6 +40,35 @@ void buy_ticket(PassengerType type, pid_t pid) {
     }
 }
 
+// Funkcja próbująca wejść do autobusu
+void board_bus(PassengerType type, pid_t pid) {
+    // 1. Sprawdź czy dworzec otwarty
+    semaphore_p(semid, SEM_MUTEX);
+    if (!bus->is_station_open) {
+        log_action("[Pasażer %d] Dworzec ZAMKNIĘTY (Sygnał 2). Rezygnuję.", pid);
+        semaphore_v(semid, SEM_MUTEX);
+        exit(0);
+    }
+    semaphore_v(semid, SEM_MUTEX);
+
+    // 2. Wybierz drzwi (1 = Zwykłe, 2 = Rowerowe)
+    int door_sem = (type == BIKER) ? SEM_DOOR_2 : SEM_DOOR_1;
+    
+    log_action("[Pasażer %d] Czekam na otwarcie drzwi %d...", pid, door_sem == SEM_DOOR_1 ? 1 : 2);
+
+    // 3. Czekaj na wejście
+    semaphore_p(semid, door_sem);
+
+    // 4. Wsiadłem - aktualizuj stan
+    semaphore_p(semid, SEM_MUTEX);
+    bus->current_passengers++;
+    if (type == BIKER) bus->current_bikes++;
+    
+    log_action("[Pasażer %d] WSIADŁEM! (Stan: %d/%d, Rowery: %d/%d)", 
+               pid, bus->current_passengers, P_CAPACITY, bus->current_bikes, R_BIKES);
+    semaphore_v(semid, SEM_MUTEX);
+}
+
 int main(int argc, char* argv[]) {
     // 1. Walidacja argumentów
     if (argc < 2) {
@@ -59,7 +88,10 @@ int main(int argc, char* argv[]) {
     // 3. Kupno biletu
     buy_ticket(type, my_pid);
 
-    // 3. Odłączenie od pamięci przed wyjściem
+    // 4. Próba wejścia
+    board_bus(type, my_pid);
+
+    // 5. Odłączenie od pamięci przed wyjściem
     shmdt(bus);
     return 0;
 }
