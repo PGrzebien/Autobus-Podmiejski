@@ -14,6 +14,9 @@ int shmid;
 int semid;
 BusState* bus = nullptr;
 
+// Flaga przerwania pętli
+volatile sig_atomic_t force_departure = 0;
+
 // Funkcja inicjalizująca zasoby (podłączenie do systemu)
 void init_resources() {
     // 1. Pobranie ID pamięci dzielonej
@@ -31,10 +34,21 @@ void init_resources() {
     log_action("[Kierowca] Zameldowałem się w systemie (PID: %d).", getpid());
 }
 
+// Handler sygnału SIGUSR1 - Wymuszony odjazd
+void handle_signal(int sig) {
+    if (sig == SIGUSR1) {
+        force_departure = 1;
+        log_action("[Kierowca] Otrzymano rozkaz odjazdu (SIGUSR1)!");
+    }
+}
+
+
 int main() {
     // 1. Podłącz zasoby
     init_resources();
-
+    // 2. Rejestracja sygnałów
+    signal(SIGUSR1, handle_signal);
+    
     log_action("[Kierowca] Jestem gotowy. Czekam na instrukcje...");
 
     // Sprzątanie przy wyjściu
