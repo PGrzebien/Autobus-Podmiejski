@@ -13,6 +13,13 @@
 int shmid;
 int semid;
 BusState* bus = nullptr;
+// Definicja unii dla semctl
+union semun {
+    int val;
+    struct semid_ds *buf;
+    unsigned short *array;
+};
+
 
 // Flaga przerwania pętli
 volatile sig_atomic_t force_departure = 0;
@@ -42,14 +49,72 @@ void handle_signal(int sig) {
     }
 }
 
+// Funkcja sterująca drzwiami (Otwórz/Zamknij)
+void set_doors(int open) {
+    union semun arg;
+    if (open) {
+        // Otwieramy: Ustawiamy wartość semafora na limit miejsc (wpuszczamy tłum)
+        arg.val = P_CAPACITY;
+        if (semctl(semid, SEM_DOOR_1, SETVAL, arg) == -1) perror("Otwieranie D1");
+        
+        arg.val = R_BIKES;
+        if (semctl(semid, SEM_DOOR_2, SETVAL, arg) == -1) perror("Otwieranie D2");
+        
+        log_action("[Drzwi] OTWARTE. Zapraszam!");
+    } else {
+        // Zamykamy: Ustawiamy semafory na 0 (blokada)
+        arg.val = 0;
+        if (semctl(semid, SEM_DOOR_1, SETVAL, arg) == -1) perror("Zamykanie D1");
+        if (semctl(semid, SEM_DOOR_2, SETVAL, arg) == -1) perror("Zamykanie D2");
+        
+        log_action("[Drzwi] ZAMKNIĘTE.");
+    }
+}
+
 
 int main() {
     // 1. Podłącz zasoby
     init_resources();
     // 2. Rejestracja sygnałów
     signal(SIGUSR1, handle_signal);
-    
-    log_action("[Kierowca] Jestem gotowy. Czekam na instrukcje...");
+
+while (true) {
+        // 1. Podjazd na stanowisko
+        semaphore_p(semid, SEM_MUTEX);
+        bus->is_at_station = 1;
+        bus->current_passengers = 0;
+        bus->current_bikes = 0;
+        log_action("[Autobus] Podstawiono nowy autobus. Kurs nr: %d", bus->total_travels + 1);
+        semaphore_v(semid, SEM_MUTEX);
+
+        // 2. Otwarcie drzwi
+        set_doors(1); // Otwórz
+
+        // 3. Oczekiwanie (Czas T lub sygnał)
+        log_action("[Autobus] Oczekiwanie na pasażerów (%d s)...", T_WAIT);
+        for (int i = 0; i < T_WAIT; i++) {
+            if (force_departure) {
+                log_action("[Autobus] ! WYMUSZONY ODJAZD (Sygnał 1) !");
+                force_departure = 0; // Reset flagi
+                break;
+            }
+            sleep(1);
+        }
+
+        // 4. Zamknięcie drzwi
+        set_doors(0); // Zamknij
+
+        // 5. Odjazd i trasa
+        semaphore_p(semid, SEM_MUTEX);
+        bus->is_at_station = 0;
+        log_action("[Autobus] ODJAZD! Pasażerów: %d/%d (Rowery: %d).", 
+                   bus->current_passengers, P_CAPACITY, bus->current_bikes);
+        bus->total_travels++;
+        semaphore_v(semid, SEM_MUTEX);
+
+        sleep(3); // Symulacja jazdy (powrót na pętlę)
+    }    
+
 
     // Sprzątanie przy wyjściu
     shmdt(bus);
