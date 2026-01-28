@@ -7,6 +7,8 @@
 #include <sys/wait.h>
 #include <ctime>
 #include "../include/common.h"
+#include "../include/utils.h"
+
 // Unia wymagana przez semctl zgodnie ze standardem System V
 union semun {
     int val;
