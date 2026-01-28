@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
@@ -27,6 +28,18 @@ void init_resources() {
     check_error(semid, "[Pasażer] Błąd semget - brak semaforów");
 }
 
+// Funkcja symulująca wizytę w Kasie
+void buy_ticket(PassengerType type, pid_t pid) {
+    srand(pid * time(NULL));
+    usleep((rand() % 500) * 1000); // Czekaj 0-500ms
+
+    if (type == VIP) {
+        log_action("[Pasażer %d] Jestem VIP - wchodzę bez kolejki do kasy.", pid);
+    } else {
+        log_action("[Kasa] Sprzedano bilet dla pasażera %d (Typ: %d).", pid, type);
+    }
+}
+
 int main(int argc, char* argv[]) {
     // 1. Walidacja argumentów
     if (argc < 2) {
@@ -43,8 +56,8 @@ int main(int argc, char* argv[]) {
     // 2. Inicjalizacja zasobów IPC
     init_resources();
 
-    printf("[Pasażer %d] Typ: %d. Widzę autobus! (Licznik kursów w SHM: %d)\n", 
-           my_pid, type_id, bus->total_travels);
+    // 3. Kupno biletu
+    buy_ticket(type, my_pid);
 
     // 3. Odłączenie od pamięci przed wyjściem
     shmdt(bus);
