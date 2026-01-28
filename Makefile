@@ -1,10 +1,16 @@
 CC = g++
 CFLAGS = -Wall -O2 -Iinclude
 
-all: autobus_sim
+all: system autobus pasazer
 
-autobus_sim: src/main.cpp src/utils.cpp
-	$(CC) $(CFLAGS) src/main.cpp src/utils.cpp -o autobus_sim
+system: src/main.cpp src/utils.cpp
+	$(CC) $(CFLAGS) src/main.cpp src/utils.cpp -o system
+
+autobus: src/bus.cpp src/utils.cpp
+	$(CC) $(CFLAGS) src/bus.cpp src/utils.cpp -o autobus
+
+pasazer: src/passenger.cpp src/utils.cpp
+	$(CC) $(CFLAGS) src/passenger.cpp src/utils.cpp -o pasazer
 
 clean:
-	rm -f autobus_sim
+	rm -f system autobus pasazer symulacja.txt
