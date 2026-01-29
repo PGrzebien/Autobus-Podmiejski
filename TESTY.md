@@ -29,7 +29,7 @@
 
 ---
 
-## 🕒 Test 2: "Godzina Policyjna" (Blokada wejścia na dworzec)
+## 🕒 Test 2: Blokada wejścia na dworzec
 **Cel:** Sprawdzenie skuteczności blokady systemowej (sygnał `SIGUSR2`) oraz weryfikacja, czy pasażerowie potrafią uszanować status dworca.
 
 ### 📝 Opis scenariusza
@@ -57,7 +57,7 @@
 
 ---
 
-## 🛑 Test 3: Zator na peronie (Atomowość operacji i odporność na sygnały)
+## 🛑 Test 3: Zator na peronie
 **Cel:** Weryfikacja, czy wymuszony odjazd autobusu nie przerywa operacji wsiadania pasażerów (ochrona sekcji krytycznej).
 
 ### 📝 Opis scenariusza
