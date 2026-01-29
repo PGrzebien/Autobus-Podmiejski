@@ -71,67 +71,76 @@ void board_bus(PassengerType type, pid_t pid, int age) {
         log_action("[Kasa] Pasażer %d (%d lat) odebrał bilet.", pid, age);
     }
 
-    // 3. Dworzec
-    semaphore_p(semid, SEM_MUTEX);
-    if (!bus->is_station_open) {
-        log_action(C_RED "[Pasażer %d] Dworzec ZAMKNIĘTY. Rezygnuję." C_RESET, pid);
+    // Pętla oczekiwania na autobus (Kolejka) ---
+    bool boarded = false;
+
+    while (!boarded) {
+        // 3. Dworzec - sprawdzamy czy otwarty
+        semaphore_p(semid, SEM_MUTEX);
+        if (!bus->is_station_open) {
+            semaphore_v(semid, SEM_MUTEX);
+            // Zamiast exit(0) -> czekamy przed wejściem
+            sleep(1);
+            continue;
+        }
         semaphore_v(semid, SEM_MUTEX);
-        exit(0);
-    }
-    semaphore_v(semid, SEM_MUTEX);
 
-    // 4. Drzwi
-    int door_sem = (type == BIKER) ? SEM_DOOR_2 : SEM_DOOR_1;
-    semaphore_p(semid, door_sem);
+        // 4. Drzwi
+        int door_sem = (type == BIKER) ? SEM_DOOR_2 : SEM_DOOR_1;
+        semaphore_p(semid, door_sem);
 
-    // 5. Wsiadanie
-    semaphore_p(semid, SEM_MUTEX);
-    
-    bool can_enter = true;
-    const char* reason = "";
-    int seats_needed = 1;
-
-    // --- LOGIKA MIEJSC ---
-    if (age < 8) {
-        seats_needed = 2; // Dziecko + Opiekun
-    }
-
-    // Sprawdzanie limitów
-    if (bus->current_passengers + seats_needed > P_CAPACITY) {
-        can_enter = false; 
-        reason = "Autobus PEŁNY (Brak miejsc dla grupy)";
-    } 
-    else if (type == BIKER && bus->current_bikes >= R_BIKES) {
-        can_enter = false;
-        reason = "Brak miejsca na ROWER";
-    }
-
-    if (can_enter) {
-        bus->current_passengers += seats_needed;
-        if (type == BIKER) bus->current_bikes++;
+        // 5. Wsiadanie
+        semaphore_p(semid, SEM_MUTEX);
         
-        // LOGOWANIE ZALEŻNE OD TYPU
-        if (age < 8) {
-            // Dziecko (Cyjan)
-            log_action(C_BOLD C_GREEN "[Wejście] " C_CYAN "DZIECKO + OPIEKUN (PID: %d, %d lat)" C_GREEN ". Stan: %d/%d" C_RESET, 
-                   pid, age, bus->current_passengers, P_CAPACITY);
-        } 
-        else if (type == BIKER) {
-            // Rowerzysta (Niebieski)
-            log_action(C_BOLD C_GREEN "[Wejście] " C_BLUE "ROWERZYSTA (PID: %d, %d lat)" C_GREEN ". Stan: %d/%d (Rowery: %d/%d)" C_RESET, 
-                   pid, age, bus->current_passengers, P_CAPACITY, bus->current_bikes, R_BIKES);
-        }
-        else {
-            // Normalny/VIP (Zielony)
-            log_action(C_BOLD C_GREEN "[Wejście] Pasażer %d (%d lat). Stan: %d/%d (Rowery: %d/%d)" C_RESET, 
-                   pid, age, bus->current_passengers, P_CAPACITY, bus->current_bikes, R_BIKES);
-        }
-    } else {
-        log_action(C_BOLD C_RED "[ODMOWA] PID: %d (%d lat) -> %s! Rezygnuję." C_RESET, pid, age, reason);
-    }
+        bool can_enter = true;
+        int seats_needed = 1;
 
-    semaphore_v(semid, SEM_MUTEX);
-    if (!can_enter) exit(0);
+        // --- LOGIKA MIEJSC ---
+        if (age < 8) {
+            seats_needed = 2; // Dziecko + Opiekun
+        }
+
+        // Sprawdzanie limitów
+        if (bus->current_passengers + seats_needed > P_CAPACITY) {
+            can_enter = false; 
+        } 
+        else if (type == BIKER && bus->current_bikes >= R_BIKES) {
+            can_enter = false;
+        }
+
+        if (can_enter) {
+            bus->current_passengers += seats_needed;
+            if (type == BIKER) bus->current_bikes++;
+      
+            usleep(10000);
+      
+            // LOGOWANIE ZALEŻNE OD TYPU
+            if (age < 8) {
+                log_action(C_BOLD C_GREEN "[Wejście] " C_CYAN "DZIECKO + OPIEKUN (PID: %d, %d lat)" C_GREEN ". Stan: %d/%d" C_RESET, 
+                       pid, age, bus->current_passengers, P_CAPACITY);
+            } 
+            else if (type == BIKER) {
+                log_action(C_BOLD C_GREEN "[Wejście] " C_BLUE "ROWERZYSTA (PID: %d, %d lat)" C_GREEN ". Stan: %d/%d (Rowery: %d/%d)" C_RESET, 
+                       pid, age, bus->current_passengers, P_CAPACITY, bus->current_bikes, R_BIKES);
+            }
+            else {
+                log_action(C_BOLD C_GREEN "[Wejście] Pasażer %d (%d lat). Stan: %d/%d (Rowery: %d/%d)" C_RESET, 
+                       pid, age, bus->current_passengers, P_CAPACITY, bus->current_bikes, R_BIKES);
+            }
+            boarded = true; // Sukces - przerywamy pętlę
+        } 
+        else {
+            // Ważne: Zwalniamy semafor drzwi, żeby nie blokować!
+            semaphore_v(semid, door_sem);
+        }
+
+        semaphore_v(semid, SEM_MUTEX);
+        
+        if (!boarded) {
+            // Czekamy na następny kurs
+            usleep(200000); 
+        }
+    }
 }
 
 int main(int argc, char* argv[]) {

@@ -31,7 +31,7 @@ union semun {
 
 // Zmienne globalne
 int shmid, semid, msgid;
-pid_t bus_pid = 0;
+pid_t bus_pids[N_BUSES]; // Tablica dla całej floty
 pid_t gen_pid = 0;
 pid_t kasa_pid = 0;
 
@@ -40,7 +40,11 @@ void cleanup(int sig) {
     printf("\n" C_BOLD C_RED "=========================================" C_RESET "\n");
     printf(C_BOLD C_RED "[System] OTRZYMANO SYGNAŁ ZAMKNIĘCIA!" C_RESET "\n");
     
-    if (bus_pid > 0) kill(bus_pid, SIGTERM);
+    // Zabijanie całej floty autobusów
+    for (int i = 0; i < N_BUSES; i++) {
+        if (bus_pids[i] > 0) kill(bus_pids[i], SIGTERM);
+    }
+    
     if (gen_pid > 0) kill(gen_pid, SIGTERM);
     if (kasa_pid > 0) kill(kasa_pid, SIGTERM);
 
@@ -63,14 +67,11 @@ void validate_parameters() {
 // Funkcja Generatora (Proces Potomny)
 void run_generator() {
     srand(time(NULL) ^ getpid());
-    // Cyjan dla generatora
     log_action(C_CYAN "[Generator] Start fabryki pasażerów (PID: %d)" C_RESET, getpid());
-    // --- FIX NA ZOMBIE ---
-    // Ignorowanie SIGCHLD powoduje, że system automatycznie "sprząta" martwe dzieci
     signal(SIGCHLD, SIG_IGN); 
-    // ---------------------
 
-    while (true) {
+    int i = 0;
+    while (i < 500) {
         usleep((rand() % 1000 + 500) * 1000); 
 
         int r = rand() % 100;
@@ -89,19 +90,15 @@ void run_generator() {
             perror("Błąd execl pasażera");
             exit(1);
         }
-       
-        
-
+        i++;
     }
-
-   
+    exit(0);
 }
 
 // Menu Dyspozytora
 void run_dispatcher() {
-    // Ładne nagłówki
     printf(C_BOLD C_BLUE "\n############################################\n");
-    printf("#     PANEL STEROWANIA DYSPOZYTORA         #\n");
+    printf("#      PANEL STEROWANIA DYSPOZYTORA         #\n");
     printf("############################################\n" C_RESET);
     printf(C_BOLD C_YELLOW " [1]" C_RESET " -> Wymuś odjazd autobusu (SIGUSR1)\n");
     printf(C_BOLD C_YELLOW " [2]" C_RESET " -> Otwórz/Zamknij dworzec (Blokada)\n");
@@ -113,10 +110,14 @@ void run_dispatcher() {
     
     while (std::cin >> cmd) {
         if (cmd == '1') {
-            // Magenta dla akcji Dyspozytora (wyróżnienie)
-            log_action(C_BOLD C_MAGENTA "[Dyspozytor] >>> WYMUSZONO ODJAZD! <<<" C_RESET);
-            if (bus_pid > 0) kill(bus_pid, SIGUSR1);
-        }
+    log_action(C_BOLD C_MAGENTA "[Dyspozytor] >>> WYMUSZONO ODJAZD! <<<" C_RESET);
+    if (bus->is_at_station && bus->bus_at_station_pid > 0) {
+        kill(bus->bus_at_station_pid, SIGUSR1);
+    } else {
+        log_action(C_RED "[System] Brak autobusu na peronie!" C_RESET);
+    }
+}
+
         else if (cmd == '2') {
             bus->is_station_open = !bus->is_station_open;
             if (bus->is_station_open) 
@@ -139,25 +140,24 @@ int main() {
     
     BusState* bus = (BusState*)shmat(shmid, NULL, 0);
     check_error(bus == (void*)-1 ? -1 : 0, "shmat init");
-    // Reset pamięci
     bus->current_passengers = 0;
     bus->current_bikes = 0;
     bus->is_station_open = 1;
     bus->total_travels = 0;
     shmdt(bus);
 
-    semid = semget(SEM_KEY, 3, IPC_CREAT | 0666);
+    semid = semget(SEM_KEY, 4, IPC_CREAT | 0666);
     check_error(semid, "semget init");
 
     union semun arg;
-    arg.val = 1; semctl(semid, SEM_MUTEX, SETVAL, arg); 
+    arg.val = 1; semctl(semid, SEM_MUTEX, SETVAL, arg);
+    arg.val = 1; semctl(semid, SEM_PLATFORM, SETVAL, arg); 
     arg.val = 0; semctl(semid, SEM_DOOR_1, SETVAL, arg); 
                  semctl(semid, SEM_DOOR_2, SETVAL, arg); 
 
     msgid = msgget(MSG_KEY, IPC_CREAT | 0666);
     check_error(msgid, "msgget init");
 
-    // Log startowy na zielono i pogrubiony
     log_action(C_BOLD C_GREEN "[System] INICJALIZACJA ZAKOŃCZONA. Uruchamiam procesy..." C_RESET);
 
     // 2. Procesy
@@ -168,11 +168,17 @@ int main() {
         exit(1);
     }
 
-    bus_pid = fork();
-    if (bus_pid == 0) {
-        execl("./autobus", "autobus", NULL);
-        perror("Błąd execl autobus");
-        exit(1);
+    // --- ZMIANA: URUCHAMIAMY FLOTĘ N_BUSES ---
+    for (int i = 0; i < N_BUSES; i++) {
+        char bus_nr[10];
+        sprintf(bus_nr, "%d", i + 1);
+        bus_pids[i] = fork();
+        if (bus_pids[i] == 0) {
+            execl("./autobus", "autobus", bus_nr, NULL);
+            perror("Błąd execl autobus");
+            exit(1);
+        }
+        usleep(50000); // Mały odstęp przy starcie
     }
 
     gen_pid = fork();

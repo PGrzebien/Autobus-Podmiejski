@@ -3,121 +3,119 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <signal.h>
+#include <time.h>
+#include <errno.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
 #include "../include/common.h"
 #include "../include/utils.h"
 
-// Zmienne globalne
-int shmid;
-int semid;
+// --- PALETA KOLORÓW ---
+#define C_RESET   "\033[0m"
+#define C_BOLD    "\033[1m"
+#define C_YELLOW  "\033[33m"
+
+int shmid, semid;
 BusState* bus = nullptr;
-// Definicja unii dla semctl
-union semun {
-    int val;
-    struct semid_ds *buf;
-    unsigned short *array;
-};
-
-
-// Flaga przerwania pętli
 volatile sig_atomic_t force_departure = 0;
 
-// Funkcja inicjalizująca zasoby (podłączenie do systemu)
+union semun { int val; struct semid_ds *buf; unsigned short *array; };
+
 void init_resources() {
-    // 1. Pobranie ID pamięci dzielonej
     shmid = shmget(SHM_KEY, sizeof(BusState), 0666);
-    check_error(shmid, "[Kierowca] Błąd shmget (uruchom najpierw main!)");
-
-    // 2. Podłączenie do pamięci
     bus = (BusState*)shmat(shmid, NULL, 0);
-    check_error(bus == (void*)-1 ? -1 : 0, "[Kierowca] Błąd shmat");
-
-    // 3. Pobranie ID semaforów
-    semid = semget(SEM_KEY, 3, 0666);
-    check_error(semid, "[Kierowca] Błąd semget");
-
-    log_action("[Kierowca] Zameldowałem się w systemie (PID: %d).", getpid());
+    semid = semget(SEM_KEY, 4, 0666); 
 }
 
-// Handler sygnału SIGUSR1 - Wymuszony odjazd
 void handle_signal(int sig) {
-    if (sig == SIGUSR1) {
+    // Reagujemy na sygnał tylko, gdy jesteśmy na peronie
+    if (sig == SIGUSR1 && bus != nullptr && bus->is_at_station) {
         force_departure = 1;
-        log_action("[Kierowca] Otrzymano rozkaz odjazdu (SIGUSR1)!");
     }
 }
 
-// Funkcja sterująca drzwiami (Otwórz/Zamknij)
 void set_doors(int open) {
     union semun arg;
-    if (open) {
-        // Otwieramy: Ustawiamy wartość semafora na limit miejsc (wpuszczamy tłum)
-        arg.val = P_CAPACITY;
-        if (semctl(semid, SEM_DOOR_1, SETVAL, arg) == -1) perror("Otwieranie D1");
-        
-        arg.val = R_BIKES;
-        if (semctl(semid, SEM_DOOR_2, SETVAL, arg) == -1) perror("Otwieranie D2");
-        
-        log_action("[Drzwi] OTWARTE. Zapraszam!");
-    } else {
-        // Zamykamy: Ustawiamy semafory na 0 (blokada)
-        arg.val = 0;
-        if (semctl(semid, SEM_DOOR_1, SETVAL, arg) == -1) perror("Zamykanie D1");
-        if (semctl(semid, SEM_DOOR_2, SETVAL, arg) == -1) perror("Zamykanie D2");
-        
-        log_action("[Drzwi] ZAMKNIĘTE.");
-    }
+    arg.val = open ? P_CAPACITY : 0;
+    semctl(semid, SEM_DOOR_1, SETVAL, arg);
+    arg.val = open ? R_BIKES : 0;
+    semctl(semid, SEM_DOOR_2, SETVAL, arg);
+    log_action(open ? "[Drzwi] OTWARTE." : "[Drzwi] ZAMKNIĘTE.");
 }
 
-
-int main() {
-    // 1. Podłącz zasoby
+int main(int argc, char* argv[]) {
+    int bus_num = (argc > 1) ? atoi(argv[1]) : 1;
+    srand(time(NULL) ^ getpid() ^ bus_num);
     init_resources();
-    // 2. Rejestracja sygnałów
     signal(SIGUSR1, handle_signal);
 
-while (bus->total_travels < N_BUSES) {
-        // 1. Podjazd na stanowisko
-        semaphore_p(semid, SEM_MUTEX);
-        bus->is_at_station = 1;
-        bus->current_passengers = 0;
-        bus->current_bikes = 0;
-        log_action("[Autobus] Podstawiono nowy autobus. Kurs nr: %d", bus->total_travels + 1);
-        semaphore_v(semid, SEM_MUTEX);
+    log_action("[Kierowca %d] Gotowy do pracy.", bus_num);
 
-        // 2. Otwarcie drzwi
-        set_doors(1); // Otwórz
+    while (true) {
+        bool entered = false;
+        struct sembuf p_platform = {SEM_PLATFORM, -1, 0};
 
-        // 3. Oczekiwanie (Czas T lub sygnał)
-        log_action("[Autobus] Oczekiwanie na pasażerów (%d s)...", T_WAIT);
+        // 1. OCZEKIWANIE NA WOLNY PERON (Odporne na EINTR)
+        while (!entered) {
+            if (semop(semid, &p_platform, 1) == -1) {
+                if (errno == EINTR) continue; 
+                exit(1);
+            }
+
+            semaphore_p(semid, SEM_MUTEX);
+            if (bus->is_at_station == 0) {
+                bus->is_at_station = 1;
+                // --- KLUCZOWY DODATEK: Meldujemy swój PID ---
+                bus->bus_at_station_pid = getpid();
+                // --------------------------------------------
+                bus->current_passengers = 0;
+                bus->current_bikes = 0;
+                entered = true;
+            }
+            semaphore_v(semid, SEM_MUTEX);
+
+            if (!entered) {
+                struct sembuf v_platform = {SEM_PLATFORM, 1, 0};
+                semop(semid, &v_platform, 1);
+                usleep(100000);
+            }
+        }
+
+        log_action(C_BOLD C_YELLOW "[Autobus %d] >>> PODSTAWIONO NA PERON <<<" C_RESET, bus_num);
+        set_doors(1); 
+        log_action("[Autobus %d] Zbieram pasażerów...", bus_num);
+        
+        // 2. OCZEKIWANIE NA PASAŻERÓW
         for (int i = 0; i < T_WAIT; i++) {
             if (force_departure) {
-                log_action("[Autobus] ! WYMUSZONY ODJAZD (Sygnał 1) !");
-                force_departure = 0; // Reset flagi
+                log_action("[Autobus %d] Otrzymano sygnał odjazdu!", bus_num);
+                force_departure = 0;
                 break;
             }
             sleep(1);
         }
 
-        // 4. Zamknięcie drzwi
-        set_doors(0); // Zamknij
+        set_doors(0); 
 
-        // 5. Odjazd i trasa
+        // 3. ODJAZD
         semaphore_p(semid, SEM_MUTEX);
         bus->is_at_station = 0;
-        log_action("[Autobus] ODJAZD! Pasażerów: %d/%d (Rowery: %d).", 
-                   bus->current_passengers, P_CAPACITY, bus->current_bikes);
+        // --- KLUCZOWY DODATEK: Czyścimy PID przy odjeździe ---
+        bus->bus_at_station_pid = 0;
+        // ----------------------------------------------------
+        log_action("[Autobus %d] ODJAZD! Pasażerów: %d/%d.", bus_num, bus->current_passengers, P_CAPACITY);
         bus->total_travels++;
         semaphore_v(semid, SEM_MUTEX);
 
-        sleep(3); // Symulacja jazdy (powrót na pętlę)
-    }    
-  
-    log_action("[System] Koniec zmiany. Wykorzystano limit %d autobusów.", N_BUSES);
+        // Zwalniamy blokadę peronu dla następnego autobusu
+        struct sembuf v_platform = {SEM_PLATFORM, 1, 0};
+        semop(semid, &v_platform, 1);
 
-    // Sprzątanie przy wyjściu
-    shmdt(bus);
+        // 4. TRASA
+        int drive_time = (rand() % 6) + 5; 
+        log_action("[Autobus %d] W trasie... (czas: %ds)", bus_num, drive_time);
+        sleep(drive_time); 
+    }    
     return 0;
 }

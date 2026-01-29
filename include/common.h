@@ -11,9 +11,10 @@
 #define SEM_MUTEX 0    // Chroni pamięć dzieloną
 #define SEM_DOOR_1 1   // Drzwi 1 (zwykłe/bagaż)
 #define SEM_DOOR_2 2   // Drzwi 2 (rowery/wózki)
+#define SEM_PLATFORM 3
 
 // --- KONFIGURACJA ---
-#define N_BUSES 3
+#define N_BUSES 10
 #define P_CAPACITY 15
 #define R_BIKES 5
 #define T_WAIT 10
@@ -43,6 +44,7 @@ typedef struct {
     int is_at_station;      // 1 = na stacji, 0 = w trasie
     int total_travels;      // Licznik kursów
     int is_station_open;    // 1 = otwarte, 0 = zamknięte (blokada)
+    pid_t bus_at_station_pid;
 } BusState;
 
 // --- KOLEJKI KOMUNIKATÓW ---
