@@ -6,6 +6,7 @@
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
+#include <sys/msg.h>
 #include "../include/common.h"
 #include "../include/utils.h"
 
@@ -19,7 +20,7 @@
 #define C_MAGENTA "\033[35m"
 #define C_CYAN    "\033[36m"
 
-int shmid, semid;
+int shmid, semid, msgid;
 BusState* bus = nullptr;
 
 void init_resources() {
@@ -29,6 +30,12 @@ void init_resources() {
     check_error(bus == (void*)-1 ? -1 : 0, "[Pasażer] Błąd shmat");
     semid = semget(SEM_KEY, 3, 0666);
     check_error(semid, "[Pasażer] Błąd semget");
+
+    msgid = msgget(MSG_KEY, 0666);
+    if (msgid == -1) {
+        perror("[Pasażer] Błąd msgget - Kasa nie działa!");
+        exit(1);
+    }
 }
 
 void board_bus(PassengerType type, pid_t pid, int age) {
@@ -44,8 +51,24 @@ void board_bus(PassengerType type, pid_t pid, int age) {
     if (type == VIP) {
         log_action(C_BOLD C_MAGENTA "[Pasażer %d] VIP (%d lat) - mam bilet, wchodzę BEZ KOLEJKI." C_RESET, pid, age);
     } else {
-        usleep((rand() % 500) * 1000); 
-        log_action("[Kasa] Pasażer %d (%d lat) kupił bilet.", pid, age);
+        TicketMsg msg;
+        msg.mtype = MSG_TYPE_REQ;
+        msg.passenger_pid = pid;
+        msg.age = age;
+
+        // Wyślij zapytanie do Kasy
+        if (msgsnd(msgid, &msg, MSG_SIZE, 0) == -1) {
+            perror("Błąd msgsnd (zakup)");
+            return;
+        }
+
+        // Czekaj na odpowiedź (Blokada procesu)
+        if (msgrcv(msgid, &msg, MSG_SIZE, pid, 0) == -1) {
+            perror("Błąd msgrcv (odbiór biletu)");
+            return;
+        }
+
+        log_action("[Kasa] Pasażer %d (%d lat) odebrał bilet.", pid, age);
     }
 
     // 3. Dworzec

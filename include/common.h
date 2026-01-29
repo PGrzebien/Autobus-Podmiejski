@@ -45,4 +45,18 @@ typedef struct {
     int is_station_open;    // 1 = otwarte, 0 = zamknięte (blokada)
 } BusState;
 
+// --- KOLEJKI KOMUNIKATÓW ---
+#define MSG_KEY 0x1234  // Klucz kolejki
+#define MSG_TYPE_REQ 1  // Typ wiadomości: Żądanie biletu
+
+// Struktura wiadomości
+struct TicketMsg {
+    long mtype;     // Typ: 1 = żądanie, PID = odpowiedź dla konkretnego procesu
+    pid_t passenger_pid; // Kto prosi
+    int age;        // Wiek
+};
+// Wielkość danych
+#define MSG_SIZE (sizeof(TicketMsg) - sizeof(long))
+
+
 #endif

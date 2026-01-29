@@ -6,6 +6,7 @@
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
+#include <sys/msg.h>
 #include <sys/wait.h>
 #include <time.h>
 #include "../include/common.h"
@@ -29,9 +30,10 @@ union semun {
 };
 
 // Zmienne globalne
-int shmid, semid;
+int shmid, semid, msgid;
 pid_t bus_pid = 0;
 pid_t gen_pid = 0;
+pid_t kasa_pid = 0;
 
 // Funkcja sprzątająca (SIGINT)
 void cleanup(int sig) {
@@ -40,9 +42,11 @@ void cleanup(int sig) {
     
     if (bus_pid > 0) kill(bus_pid, SIGTERM);
     if (gen_pid > 0) kill(gen_pid, SIGTERM);
+    if (kasa_pid > 0) kill(kasa_pid, SIGTERM);
 
     if (shmctl(shmid, IPC_RMID, NULL) == -1) perror("Błąd usuwania SHM");
     if (semctl(semid, 0, IPC_RMID) == -1) perror("Błąd usuwania SEM");
+    if (msgctl(msgid, IPC_RMID, NULL) == -1) perror("Błąd usuwania MSG");
     
     printf(C_RED "[System] Zasoby wyczyszczone. Do widzenia." C_RESET "\n");
     printf(C_BOLD C_RED "=========================================" C_RESET "\n");
@@ -66,7 +70,6 @@ void run_generator() {
     signal(SIGCHLD, SIG_IGN); 
     // ---------------------
 
-    srand(time(NULL) ^ getpid());
     while (true) {
         usleep((rand() % 1000 + 500) * 1000); 
 
@@ -86,7 +89,12 @@ void run_generator() {
             perror("Błąd execl pasażera");
             exit(1);
         }
+       
+        
+
     }
+
+   
 }
 
 // Menu Dyspozytora
@@ -146,10 +154,20 @@ int main() {
     arg.val = 0; semctl(semid, SEM_DOOR_1, SETVAL, arg); 
                  semctl(semid, SEM_DOOR_2, SETVAL, arg); 
 
+    msgid = msgget(MSG_KEY, IPC_CREAT | 0666);
+    check_error(msgid, "msgget init");
+
     // Log startowy na zielono i pogrubiony
     log_action(C_BOLD C_GREEN "[System] INICJALIZACJA ZAKOŃCZONA. Uruchamiam procesy..." C_RESET);
 
     // 2. Procesy
+    kasa_pid = fork();
+    if (kasa_pid == 0) {
+        execl("./kasa", "kasa", NULL);
+        perror("Błąd execl kasa");
+        exit(1);
+    }
+
     bus_pid = fork();
     if (bus_pid == 0) {
         execl("./autobus", "autobus", NULL);
