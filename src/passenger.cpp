@@ -9,117 +9,125 @@
 #include "../include/common.h"
 #include "../include/utils.h"
 
-// Zmienne globalne
+// --- PALETA KOLORÓW ---
+#define C_RESET   "\033[0m"
+#define C_BOLD    "\033[1m"
+#define C_RED     "\033[31m"
+#define C_GREEN   "\033[32m"
+#define C_YELLOW  "\033[33m"
+#define C_BLUE    "\033[34m"
+#define C_MAGENTA "\033[35m"
+#define C_CYAN    "\033[36m"
+
 int shmid, semid;
 BusState* bus = nullptr;
 
-// Inicjalizacja zasobów IPC
 void init_resources() {
     shmid = shmget(SHM_KEY, sizeof(BusState), 0666);
     check_error(shmid, "[Pasażer] Błąd shmget");
-    
     bus = (BusState*)shmat(shmid, NULL, 0);
     check_error(bus == (void*)-1 ? -1 : 0, "[Pasażer] Błąd shmat");
-    
     semid = semget(SEM_KEY, 3, 0666);
     check_error(semid, "[Pasażer] Błąd semget");
 }
 
-// Główna logika pasażera
 void board_bus(PassengerType type, pid_t pid, int age) {
-    // 1. Walidacja wieku (Wymóg: < 8 lat tylko z opiekunem)
+    // 1. Walidacja wieku (Dziecko < 8 lat)
     if (age < 8) {
-        // Symulacja: 10% szans, że dziecko jest samo (brak opiekuna)
         if (rand() % 100 < 10) {
-            log_action("[Kontrola] Dziecko (%d lat, PID: %d) bez opiekuna! Odmowa wstępu.", age, pid);
-            return; // Dziecko odchodzi, proces kończy działanie
+            log_action(C_BOLD C_RED "[Kontrola] Dziecko (%d lat, PID: %d) bez opiekuna! ODMOWA." C_RESET, age, pid);
+            return;
         }
     }
 
-    // 2. Obsługa biletu (Wymóg: VIP wchodzi bez kolejki)
+    // 2. Bilet
     if (type == VIP) {
-        log_action("[Pasażer %d] VIP (%d lat) - mam bilet, wchodzę bez kolejki.", pid, age);
+        log_action(C_BOLD C_MAGENTA "[Pasażer %d] VIP (%d lat) - mam bilet, wchodzę BEZ KOLEJKI." C_RESET, pid, age);
     } else {
-        // Symulacja stania w kolejce do kasy (zakup biletu)
         usleep((rand() % 500) * 1000); 
         log_action("[Kasa] Pasażer %d (%d lat) kupił bilet.", pid, age);
     }
 
-    // 3. Sprawdź czy dworzec jest otwarty (Obsługa sygnału 2 od Dyspozytora)
+    // 3. Dworzec
     semaphore_p(semid, SEM_MUTEX);
     if (!bus->is_station_open) {
-        log_action("[Pasażer %d] Dworzec ZAMKNIĘTY (Sygnał 2). Rezygnuję.", pid);
+        log_action(C_RED "[Pasażer %d] Dworzec ZAMKNIĘTY. Rezygnuję." C_RESET, pid);
         semaphore_v(semid, SEM_MUTEX);
         exit(0);
     }
     semaphore_v(semid, SEM_MUTEX);
 
-    // 4. Wybór odpowiednich drzwi
+    // 4. Drzwi
     int door_sem = (type == BIKER) ? SEM_DOOR_2 : SEM_DOOR_1;
-    
-    // --- OCZEKIWANIE NA WEJŚCIE ---
-    // Tutaj proces czeka, aż kierowca otworzy drzwi (podniesie semafor)
     semaphore_p(semid, door_sem);
 
-    // 5. Wsiadanie (Sekcja Krytyczna)
+    // 5. Wsiadanie
     semaphore_p(semid, SEM_MUTEX);
     
     bool can_enter = true;
-    
-    // Kierowca pilnuje limitów P (pasażerowie) i R (rowery)
-    if (bus->current_passengers >= P_CAPACITY) {
+    const char* reason = "";
+    int seats_needed = 1;
+
+    // --- LOGIKA MIEJSC ---
+    if (age < 8) {
+        seats_needed = 2; // Dziecko + Opiekun
+    }
+
+    // Sprawdzanie limitów
+    if (bus->current_passengers + seats_needed > P_CAPACITY) {
         can_enter = false; 
+        reason = "Autobus PEŁNY (Brak miejsc dla grupy)";
     } 
     else if (type == BIKER && bus->current_bikes >= R_BIKES) {
         can_enter = false;
+        reason = "Brak miejsca na ROWER";
     }
 
     if (can_enter) {
-        bus->current_passengers++;
+        bus->current_passengers += seats_needed;
         if (type == BIKER) bus->current_bikes++;
         
-        log_action("[Wejście] %d (%d lat) wchodzi. Stan: %d/%d (Rowery: %d/%d)", 
+        // LOGOWANIE ZALEŻNE OD TYPU
+        if (age < 8) {
+            // Dziecko (Cyjan)
+            log_action(C_BOLD C_GREEN "[Wejście] " C_CYAN "DZIECKO + OPIEKUN (PID: %d, %d lat)" C_GREEN ". Stan: %d/%d" C_RESET, 
+                   pid, age, bus->current_passengers, P_CAPACITY);
+        } 
+        else if (type == BIKER) {
+            // Rowerzysta (Niebieski)
+            log_action(C_BOLD C_GREEN "[Wejście] " C_BLUE "ROWERZYSTA (PID: %d, %d lat)" C_GREEN ". Stan: %d/%d (Rowery: %d/%d)" C_RESET, 
                    pid, age, bus->current_passengers, P_CAPACITY, bus->current_bikes, R_BIKES);
+        }
+        else {
+            // Normalny/VIP (Zielony)
+            log_action(C_BOLD C_GREEN "[Wejście] Pasażer %d (%d lat). Stan: %d/%d (Rowery: %d/%d)" C_RESET, 
+                   pid, age, bus->current_passengers, P_CAPACITY, bus->current_bikes, R_BIKES);
+        }
     } else {
-        // Sytuacja rzadka (wyścig), ale możliwa - brak miejsca
-        log_action("[Pasażer %d] Brak miejsca w środku! Rezygnuję.", pid);
+        log_action(C_BOLD C_RED "[ODMOWA] PID: %d (%d lat) -> %s! Rezygnuję." C_RESET, pid, age, reason);
     }
 
     semaphore_v(semid, SEM_MUTEX);
-    
-    // Jeśli nie udało się wejść, proces musi zniknąć
     if (!can_enter) exit(0);
 }
 
 int main(int argc, char* argv[]) {
-    // Walidacja argumentów
-    if (argc < 2) {
-        fprintf(stderr, "Użycie: %s [typ 0-3]\n", argv[0]);
-        exit(EXIT_FAILURE);
-    }
-
+    if (argc < 2) exit(EXIT_FAILURE);
     int type_id = atoi(argv[1]);
     PassengerType type = static_cast<PassengerType>(type_id);
     pid_t my_pid = getpid();
     
-    // Unikalny seed dla liczb losowych
     srand(my_pid * time(NULL));
-
-    // Podłączenie do systemu
     init_resources();
 
-    // Generowanie WIEKU (Wymóg: Dziecko < 8 lat, reszta starsza)
     int age;
     if (type == CHILD_WITH_GUARDIAN) {
-        age = rand() % 8;        // Wiek 0-7 lat
+        age = rand() % 8; 
     } else {
-        age = 8 + (rand() % 75); // Wiek 8-82 lat
+        age = 8 + (rand() % 75); 
     }
 
-    // Próba wejścia do autobusu
     board_bus(type, my_pid, age);
-
-    // Sprzątanie pamięci lokalnej
     shmdt(bus);
     return 0;
 }

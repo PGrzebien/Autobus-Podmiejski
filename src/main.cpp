@@ -11,6 +11,16 @@
 #include "../include/common.h"
 #include "../include/utils.h"
 
+// --- PALETA KOLORÓW (UX/UI) ---
+#define C_RESET   "\033[0m"
+#define C_BOLD    "\033[1m"
+#define C_RED     "\033[31m"
+#define C_GREEN   "\033[32m"
+#define C_YELLOW  "\033[33m"
+#define C_BLUE    "\033[34m"
+#define C_MAGENTA "\033[35m"
+#define C_CYAN    "\033[36m"
+
 // Unia dla semctl
 union semun {
     int val;
@@ -18,109 +28,144 @@ union semun {
     unsigned short *array;
 };
 
-// Zmienne globalne (potrzebne do sprzątania)
+// Zmienne globalne
 int shmid, semid;
 pid_t bus_pid = 0;
 pid_t gen_pid = 0;
 
-// Funkcja sprzątająca (SIGINT - Ctrl+C)
+// Funkcja sprzątająca (SIGINT)
 void cleanup(int sig) {
-    printf("\n[System] Zamykanie symulacji...\n");
+    printf("\n" C_BOLD C_RED "=========================================" C_RESET "\n");
+    printf(C_BOLD C_RED "[System] OTRZYMANO SYGNAŁ ZAMKNIĘCIA!" C_RESET "\n");
     
-    // Zabijamy procesy potomne
     if (bus_pid > 0) kill(bus_pid, SIGTERM);
     if (gen_pid > 0) kill(gen_pid, SIGTERM);
 
-    // Usuwamy pamięć i semafory
     if (shmctl(shmid, IPC_RMID, NULL) == -1) perror("Błąd usuwania SHM");
     if (semctl(semid, 0, IPC_RMID) == -1) perror("Błąd usuwania SEM");
     
-    printf("[System] Zasoby wyczyszczone. Koniec.\n");
+    printf(C_RED "[System] Zasoby wyczyszczone. Do widzenia." C_RESET "\n");
+    printf(C_BOLD C_RED "=========================================" C_RESET "\n");
     exit(0);
 }
 
-// Funkcja Generatora (Proces Potomny)
-// Zamiast symulować, tworzy nowe procesy pasażerów
-void run_generator() {
-    srand(time(NULL) ^ getpid());
-    log_action("[Generator] Start procesu generowania (PID: %d)", getpid());
-
-    while (true) {
-        // Losowy odstęp czasu
-        usleep((rand() % 1000 + 500) * 1000); 
-
-        // Losowanie typu pasażera
-        int type_id = rand() % 4; // 0-3
-        char type_str[2];
-        sprintf(type_str, "%d", type_id);
-
-        // FORK + EXEC (Tworzenie pasażera)
-        pid_t p_pid = fork();
-        if (p_pid == 0) {
-            // To jest proces pasażera - podmieniamy kod na plik wykonywalny
-            execl("./pasazer", "pasazer", type_str, NULL);
-            
-            // Jeśli execl zawiedzie:
-            perror("Błąd execl pasażera");
-            exit(1);
-        }
-        
-        // Proces generatora wraca do pętli, by stworzyć kolejnego
+void validate_parameters() {
+    if (R_BIKES > P_CAPACITY) {
+        fprintf(stderr, C_BOLD C_RED "BŁĄD KRYTYCZNY: Liczba rowerów (%d) > Miejsc (%d)!\n" C_RESET, R_BIKES, P_CAPACITY);
+        exit(1);
     }
 }
 
-int main() {
-    // Rejestracja sprzątania
-    signal(SIGINT, cleanup);
+// Funkcja Generatora (Proces Potomny)
+void run_generator() {
+    srand(time(NULL) ^ getpid());
+    // Cyjan dla generatora
+    log_action(C_CYAN "[Generator] Start fabryki pasażerów (PID: %d)" C_RESET, getpid());
+    // --- FIX NA ZOMBIE ---
+    // Ignorowanie SIGCHLD powoduje, że system automatycznie "sprząta" martwe dzieci
+    signal(SIGCHLD, SIG_IGN); 
+    // ---------------------
 
-    // 1. Tworzenie pamięci dzielonej (IPC_CREAT)
+    srand(time(NULL) ^ getpid());
+    while (true) {
+        usleep((rand() % 1000 + 500) * 1000); 
+
+        int r = rand() % 100;
+        int type_id;
+        if (r < 1) type_id = 2;       // VIP (1%)
+        else if (r < 15) type_id = 3; // DZIECKO (ok. 14%)
+        else if (r < 40) type_id = 1; // ROWERZYSTA (25%)
+        else type_id = 0;             // NORMALNY (60%)
+
+        char type_str[10];
+        sprintf(type_str, "%d", type_id);
+
+        pid_t p_pid = fork();
+        if (p_pid == 0) {
+            execl("./pasazer", "pasazer", type_str, NULL);
+            perror("Błąd execl pasażera");
+            exit(1);
+        }
+    }
+}
+
+// Menu Dyspozytora
+void run_dispatcher() {
+    // Ładne nagłówki
+    printf(C_BOLD C_BLUE "\n############################################\n");
+    printf("#     PANEL STEROWANIA DYSPOZYTORA         #\n");
+    printf("############################################\n" C_RESET);
+    printf(C_BOLD C_YELLOW " [1]" C_RESET " -> Wymuś odjazd autobusu (SIGUSR1)\n");
+    printf(C_BOLD C_YELLOW " [2]" C_RESET " -> Otwórz/Zamknij dworzec (Blokada)\n");
+    printf(C_BOLD C_RED    " [q]" C_RESET " -> Zakończ symulację\n");
+    printf(C_BLUE "--------------------------------------------\n" C_RESET);
+
+    BusState* bus = (BusState*)shmat(shmid, NULL, 0);
+    char cmd;
+    
+    while (std::cin >> cmd) {
+        if (cmd == '1') {
+            // Magenta dla akcji Dyspozytora (wyróżnienie)
+            log_action(C_BOLD C_MAGENTA "[Dyspozytor] >>> WYMUSZONO ODJAZD! <<<" C_RESET);
+            if (bus_pid > 0) kill(bus_pid, SIGUSR1);
+        }
+        else if (cmd == '2') {
+            bus->is_station_open = !bus->is_station_open;
+            if (bus->is_station_open) 
+                log_action(C_BOLD C_GREEN "[Dyspozytor] Dworzec OTWARTY dla podróżnych." C_RESET);
+            else 
+                log_action(C_BOLD C_RED "[Dyspozytor] Dworzec ZAMKNIĘTY (Blokada wejścia)." C_RESET);
+        }
+        else if (cmd == 'q') break;
+    }
+    shmdt(bus);
+}
+
+int main() {
+    signal(SIGINT, cleanup);
+    validate_parameters();
+
+    // 1. IPC
     shmid = shmget(SHM_KEY, sizeof(BusState), IPC_CREAT | 0666);
     check_error(shmid, "shmget init");
     
-    // Inicjalizacja pamięci zerami
     BusState* bus = (BusState*)shmat(shmid, NULL, 0);
     check_error(bus == (void*)-1 ? -1 : 0, "shmat init");
+    // Reset pamięci
     bus->current_passengers = 0;
     bus->current_bikes = 0;
     bus->is_station_open = 1;
     bus->total_travels = 0;
     shmdt(bus);
 
-    // 2. Tworzenie semaforów
     semid = semget(SEM_KEY, 3, IPC_CREAT | 0666);
     check_error(semid, "semget init");
 
-    // Ustawienie wartości początkowych
     union semun arg;
-    arg.val = 1; 
-    semctl(semid, SEM_MUTEX, SETVAL, arg); // Mutex otwarty
-    
-    arg.val = 0; 
-    semctl(semid, SEM_DOOR_1, SETVAL, arg); // Drzwi 1 zamknięte
-    semctl(semid, SEM_DOOR_2, SETVAL, arg); // Drzwi 2 zamknięte
+    arg.val = 1; semctl(semid, SEM_MUTEX, SETVAL, arg); 
+    arg.val = 0; semctl(semid, SEM_DOOR_1, SETVAL, arg); 
+                 semctl(semid, SEM_DOOR_2, SETVAL, arg); 
 
-    log_action("[System] Zasoby IPC gotowe.");
+    // Log startowy na zielono i pogrubiony
+    log_action(C_BOLD C_GREEN "[System] INICJALIZACJA ZAKOŃCZONA. Uruchamiam procesy..." C_RESET);
 
-    // 3. Uruchomienie Autobusu (FORK + EXEC)
+    // 2. Procesy
     bus_pid = fork();
     if (bus_pid == 0) {
         execl("./autobus", "autobus", NULL);
-        perror("Błąd execl autobus"); // To się wykona tylko przy błędzie
+        perror("Błąd execl autobus");
         exit(1);
     }
 
-    // 4. Uruchomienie Generatora (FORK)
     gen_pid = fork();
     if (gen_pid == 0) {
         run_generator();
         exit(0);
     }
 
-    // 5. Pętla oczekiwania
-    log_action("[System] Uruchomiono procesy. Czekam na Ctrl+C...");
-    while (true) {
-        pause(); // Czeka na sygnały (np. zakończenie)
-    }
+    // 3. Menu
+    run_dispatcher();
 
+    cleanup(0);
     return 0;
 }
