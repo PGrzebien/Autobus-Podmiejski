@@ -28,7 +28,7 @@ void init_resources() {
     check_error(shmid, "[Pasażer] Błąd shmget");
     bus = (BusState*)shmat(shmid, NULL, 0);
     check_error(bus == (void*)-1 ? -1 : 0, "[Pasażer] Błąd shmat");
-    semid = semget(SEM_KEY, 3, 0666);
+    semid = semget(SEM_KEY, 5, 0666);
     check_error(semid, "[Pasażer] Błąd semget");
 
     msgid = msgget(MSG_KEY, 0666);
@@ -160,6 +160,9 @@ int main(int argc, char* argv[]) {
     }
 
     board_bus(type, my_pid, age);
+
+    semaphore_v(semid, SEM_LIMIT); // Zwalniam miejsce w systemie (V)
+
     shmdt(bus);
     return 0;
 }

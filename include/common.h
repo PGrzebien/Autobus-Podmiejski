@@ -12,9 +12,9 @@
 #define SEM_DOOR_1 1   // Drzwi 1 (zwykłe/bagaż)
 #define SEM_DOOR_2 2   // Drzwi 2 (rowery/wózki)
 #define SEM_PLATFORM 3
-
+#define SEM_LIMIT    4
 // --- KONFIGURACJA ---
-#define N_BUSES 10
+#define N_BUSES 3
 #define P_CAPACITY 15
 #define R_BIKES 5
 #define T_WAIT 10

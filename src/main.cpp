@@ -1,4 +1,4 @@
-#include <iostream>
+	#include <iostream>
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -84,6 +84,8 @@ void run_generator() {
         char type_str[10];
         sprintf(type_str, "%d", type_id);
 
+        semaphore_p(semid, SEM_LIMIT);
+
         pid_t p_pid = fork();
         if (p_pid == 0) {
             execl("./pasazer", "pasazer", type_str, NULL);
@@ -146,14 +148,16 @@ int main() {
     bus->total_travels = 0;
     shmdt(bus);
 
-    semid = semget(SEM_KEY, 4, IPC_CREAT | 0666);
+    semid = semget(SEM_KEY, 5, IPC_CREAT | 0666);
     check_error(semid, "semget init");
 
     union semun arg;
     arg.val = 1; semctl(semid, SEM_MUTEX, SETVAL, arg);
     arg.val = 1; semctl(semid, SEM_PLATFORM, SETVAL, arg); 
     arg.val = 0; semctl(semid, SEM_DOOR_1, SETVAL, arg); 
-                 semctl(semid, SEM_DOOR_2, SETVAL, arg); 
+                 semctl(semid, SEM_DOOR_2, SETVAL, arg);     
+    arg.val = 200; // Limit: max 200 pasażerów w systemie naraz
+    semctl(semid, SEM_LIMIT, SETVAL, arg);
 
     msgid = msgget(MSG_KEY, IPC_CREAT | 0666);
     check_error(msgid, "msgget init");
@@ -168,7 +172,7 @@ int main() {
         exit(1);
     }
 
-    // --- ZMIANA: URUCHAMIAMY FLOTĘ N_BUSES ---
+    // --- URUCHAMIAMY FLOTĘ N_BUSES ---
     for (int i = 0; i < N_BUSES; i++) {
         char bus_nr[10];
         sprintf(bus_nr, "%d", i + 1);
