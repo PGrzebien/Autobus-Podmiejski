@@ -146,6 +146,7 @@ int main() {
     bus->current_bikes = 0;
     bus->is_station_open = 1;
     bus->total_travels = 0;
+    bus->vips_waiting = 0;
     shmdt(bus);
 
     semid = semget(SEM_KEY, 5, IPC_CREAT | 0666);

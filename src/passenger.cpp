@@ -70,6 +70,13 @@ void board_bus(PassengerType type, pid_t pid, int age) {
 
         log_action("[Kasa] Pasażer %d (%d lat) odebrał bilet.", pid, age);
     }
+    
+    // --- REJESTRACJA VIP ---
+    if (type == VIP) {
+        semaphore_p(semid, SEM_MUTEX);
+        bus->vips_waiting++;
+        semaphore_v(semid, SEM_MUTEX);
+    }
 
     // Pętla oczekiwania na autobus (Kolejka) ---
     bool boarded = false;
@@ -84,6 +91,18 @@ void board_bus(PassengerType type, pid_t pid, int age) {
             continue;
         }
         semaphore_v(semid, SEM_MUTEX);
+
+        // --- USTĘPOWANIE VIP-om ---
+        if (type != VIP) {
+            semaphore_p(semid, SEM_MUTEX);
+            int waiting = bus->vips_waiting;
+            semaphore_v(semid, SEM_MUTEX);
+
+            if (waiting > 0) {
+                usleep(200000); // 0.2s czekania
+                continue;       // Wracam na początek, nie biorę semafora drzwi
+            }
+        }
 
         // 4. Drzwi
         int door_sem = (type == BIKER) ? SEM_DOOR_2 : SEM_DOOR_1;
@@ -111,7 +130,12 @@ void board_bus(PassengerType type, pid_t pid, int age) {
         if (can_enter) {
             bus->current_passengers += seats_needed;
             if (type == BIKER) bus->current_bikes++;
-      
+            
+            // --- VIP WSIADŁ ---
+            if (type == VIP) {
+                bus->vips_waiting--;
+            }
+
             usleep(10000);
       
             // LOGOWANIE ZALEŻNE OD TYPU

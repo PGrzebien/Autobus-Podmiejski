@@ -45,6 +45,7 @@ typedef struct {
     int total_travels;      // Licznik kursów
     int is_station_open;    // 1 = otwarte, 0 = zamknięte (blokada)
     pid_t bus_at_station_pid;
+    int vips_waiting;
 } BusState;
 
 // --- KOLEJKI KOMUNIKATÓW ---

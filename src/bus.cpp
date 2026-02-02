@@ -15,6 +15,7 @@
 #define C_RESET   "\033[0m"
 #define C_BOLD    "\033[1m"
 #define C_YELLOW  "\033[33m"
+#define C_GREEN   "\033[32m"
 
 int shmid, semid;
 BusState* bus = nullptr;
@@ -92,6 +93,16 @@ int main(int argc, char* argv[]) {
                 log_action("[Autobus %d] Otrzymano sygnał odjazdu!", bus_num);
                 force_departure = 0;
                 break;
+            }
+            
+            // --- SPRAWDZENIE CZY PEŁNY ---
+            semaphore_p(semid, SEM_MUTEX);
+            bool is_full = (bus->current_passengers >= P_CAPACITY);
+            semaphore_v(semid, SEM_MUTEX);
+
+            if (is_full) {
+                 log_action(C_BOLD C_GREEN "[Autobus %d] Komplet pasażerów! Odjeżdżam wcześniej." C_RESET, bus_num);
+                 break;
             }
             sleep(1);
         }
