@@ -7,6 +7,7 @@
 #include <sys/shm.h>
 #include <sys/sem.h>
 #include <sys/msg.h>
+#include <pthread.h>
 #include "../include/common.h"
 #include "../include/utils.h"
 
@@ -36,6 +37,13 @@ void init_resources() {
         perror("[Pasażer] Błąd msgget - Kasa nie działa!");
         exit(1);
     }
+}
+
+// --- FUNKCJA WĄTKU (DZIECKO) ---
+void* child_thread_behavior(void* arg) {
+    // Ten wątek reprezentuje dziecko wewnątrz procesu rodzica.
+    // Nie walczy o zasoby (robi to Rodzic), po prostu "jest" w autobusie.
+    return NULL; 
 }
 
 void board_bus(PassengerType type, pid_t pid, int age) {
@@ -131,6 +139,16 @@ void board_bus(PassengerType type, pid_t pid, int age) {
             bus->current_passengers += seats_needed;
             if (type == BIKER) bus->current_bikes++;
             
+            // --- WĄTEK DZIECKA ---
+            if (age < 8) {
+                pthread_t child_tid;
+                // Tworzymy wątek dziecka, które "siada" na zajętym przez rodzica miejscu
+                if (pthread_create(&child_tid, NULL, child_thread_behavior, NULL) == 0) {
+                    pthread_join(child_tid, NULL); // Rodzic upewnia się, że dziecko usiadło
+                }
+            }
+           
+    
             // --- VIP WSIADŁ ---
             if (type == VIP) {
                 bus->vips_waiting--;

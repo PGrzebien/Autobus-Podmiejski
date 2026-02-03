@@ -10,7 +10,7 @@ autobus: src/bus.cpp src/utils.cpp
 	$(CC) $(CFLAGS) src/bus.cpp src/utils.cpp -o autobus
 
 pasazer: src/passenger.cpp src/utils.cpp
-	$(CC) $(CFLAGS) src/passenger.cpp src/utils.cpp -o pasazer
+	$(CC) $(CFLAGS) -pthread src/passenger.cpp src/utils.cpp -o pasazer
 
 kasa: src/kasa.cpp src/utils.cpp
 	$(CC) $(CFLAGS) src/kasa.cpp src/utils.cpp -o kasa
