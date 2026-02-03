@@ -11,7 +11,7 @@
 3. Próba wysłania sygnału `SIGUSR1` przez Dyspozytora w oknie czasowym, gdy wszystkie autobusy są w trasie.
 
 ### 📥 Wynik (Logi systemowe)
-```text
+```
 [Autobus 2] ODJAZD! Pasażerów: 1/15.
 [Autobus 2] W trasie... (czas: 9s)
 [Autobus 3] >>> PODSTAWIONO NA PERON <<<
@@ -39,7 +39,7 @@
 4. Dyspozytor zdejmuje blokadę – następuje gwałtowne wypełnienie autobusu.
 
 ### 📥 Wynik (Logi systemowe)
-```text
+``` 
 [Dyspozytor] Dworzec ZAMKNIĘTY (Blokada wejścia).
 [Kasa] Pasażer 3642 (0 lat) odebrał bilet.
 [Autobus 1] ODJAZD! Pasażerów: 4/15. (Odjazd mimo wolnych miejsc)
@@ -65,7 +65,7 @@
 2. Wysłanie sygnału wymuszonego odjazdu (komenda `1`) dokładnie w trakcie trwania procedury wsiadania.
 
 ### 📥 Wynik (Logi systemowe)
-```text
+```
 [Dyspozytor] >>> WYMUSZONO ODJAZD! <<<
 [Autobus 1] Otrzymano sygnał odjazdu!
 [Drzwi] ZAMKNIĘTE.
@@ -100,3 +100,37 @@
 * **Precyzja atomowa:** System poprawnie obsłużył inkrementację o 2 (13→15) bez błędu przepełnienia.
 * **Logika biznesowa:** Logi potwierdzają działanie funkcji walidującej wiek (`ODMOWA`).
 * **Zarządzanie niedopełnieniem:** System chroni integralność grupy, nie rozdzielając dziecka od opiekuna, gdy na peronie zostało tylko jedno wolne miejsce.
+
+## 👑 Test 5: Priorytet VIP i Kolejkowanie (Stress Test)
+**Cel:** Weryfikacja mechanizmu pierwszeństwa VIP-ów w sytuacji zatoru (zamknięty dworzec) oraz sprawdzenie logiki opróżniania bufora oczekujących.
+
+### 📝 Opis scenariusza
+1. Dyspozytor zamyka dworzec (komenda `2`).
+2. Generator produkuje mieszankę pasażerów (VIP, Rowerzyści, Normalni), którzy utykają w poczekalni (active waiting).
+3. Dyspozytor otwiera dworzec.
+4. Oczekujemy, że VIP-y, które przyszły później, wejdą do autobusu **przed** zwykłymi pasażerami czekającymi dłużej.
+
+### 📥 Wynik (Logi systemowe)
+```
+[Dyspozytor] Dworzec ZAMKNIĘTY (Blokada wejścia).
+[Pasażer 3578] VIP (73 lat) - mam bilet, wchodzę BEZ KOLEJKI.
+[Kasa] Pasażer 3579 (52 lat) odebrał bilet.
+[Pasażer 3581] VIP (14 lat) - mam bilet, wchodzę BEZ KOLEJKI.
+[Kasa] Pasażer 3582 (44 lat) odebrał bilet.
+... (Kolejka rośnie, procesy oczekują na otwarcie bramek) ...
+[Pasażer 3593] VIP (47 lat) - mam bilet, wchodzę BEZ KOLEJKI.
+
+[Dyspozytor] Dworzec OTWARTY dla podróżnych.
+[Wejście] Pasażer 3589 (50 lat). Stan: 1/15  <-- VIP (wszedł jako pierwszy)
+[Wejście] Pasażer 3578 (73 lat). Stan: 2/15  <-- VIP
+[Wejście] Pasażer 3593 (47 lat). Stan: 3/15  <-- VIP
+...
+[Wejście] Pasażer 3581 (14 lat). Stan: 8/15  <-- Ostatni VIP z grupy
+[Wejście] DZIECKO + OPIEKUN (PID: 3594, 2 lat). Stan: 10/15 <-- Dopiero teraz wchodzą inni
+[Wejście] ROWERZYSTA (PID: 3582, 44 lat). Stan: 12/15
+[Wejście] Pasażer 3579 (52 lat). Stan: 13/15
+```
+### 🧐 Wnioski techniczne
+* **Działanie Priorytetu:** Logi jednoznacznie pokazują, że po otwarciu bramek, procesy VIP zdobyły dostęp do sekcji krytycznej semafora wejściowego jako pierwsze, wyprzedzając procesy normalne (np. PID 3579, który czekał od początku testu).
+* **Mechanizm synchronizacji:** Zmienna `vips_waiting` w pamięci dzielonej (SHM) poprawnie wymusiła ustąpienie miejsca przez zwykłe procesy (zastosowano `usleep` w pętli decyzyjnej), co zapobiegło zjawisku zagłodzenia VIP-ów.
+* **Stabilność przy obciążeniu:** Mimo nagłego "uderzenia" kilkunastu procesów naraz (tzw. thundering herd problem przy otwarciu semafora), system zachował spójność danych i poprawnie zaktualizował liczniki miejsc.
