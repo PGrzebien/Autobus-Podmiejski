@@ -1,12 +1,13 @@
 # 🚌 Symulacja Węzła Komunikacyjnego (Autobus Podmiejski)
 
 **Autor:** Patryk Grzebień (139922)  
-**Temat:** Temat 12 - Autobus podmiejski
+**Temat:** Temat 12 - Autobus podmiejski  
+**Repozytorium:** [Autobus-Podmiejski](https://github.com/PGrzebien/Autobus-Podmiejski)
 
 ---
 
 ## 📖 Opis Projektu
-Projekt realizuje wysokowydajną symulację systemu transportowego w środowisku Linux, opartą na architekturze wieloprocesowej. System zarządza flotą autobusów, strumieniem pasażerów oraz kasą biletową, gdzie każda jednostka jest autonomicznym procesem. 
+Projekt realizuje wysokowydajną symulację systemu transportowego w środowisku Linux, opartą na architekturze wieloprocesowej. System zarządza flotą autobusów, strumieniem pasażerów oraz kasą biletową, gdzie każda jednostka jest autonomicznym procesem.
 
 Głównym celem inżynierskim była implementacja bezpiecznej synchronizacji dostępu do zasobów współdzielonych (peron, miejsca w pojeździe) bez użycia wątków, wykorzystując natywne mechanizmy **IPC Systemu V**.
 
@@ -19,8 +20,10 @@ Projekt wyróżnia się zastosowaniem zaawansowanych mechanizmów systemowych zg
     * Semafory licznikowe do sterowania pojemnością i drzwiami.
 * **Pamięć Współdzielona (`shm`):** Przechowywanie globalnego stanu stacji oraz PID autobusu stojącego na peronie, co umożliwia celowane wysyłanie sygnałów.
 * **Kolejki Komunikatów (`msg queue`):** Asynchroniczna komunikacja na linii Pasażer-Kasa z wykorzystaniem typowania wiadomości (selektywny odbiór po PID).
-* **Obsługa Sygnałów:**
-    * `SIGUSR1`: Interwencja Dyspozytora (wymuszony odjazd konkretnego pojazdu).
+* **Obsługa Sygnałów (4 typy):**
+    * `SIGUSR1`: Interwencja Dyspozytora – wymuszony odjazd pojazdu.
+    * `SIGUSR2`: Obsługa blokady wjazdu na stację (zamykanie/otwieranie dworca).
+    * `SIGINT`: Bezpieczne zamykanie systemu (Graceful Shutdown) inicjowane przez użytkownika.
     * `SIGCHLD`: Automatyczne usuwanie procesów potomnych (zapobieganie procesom Zombie).
 
 ## 🛠️ Kompilacja i Uruchomienie
@@ -37,33 +40,31 @@ Aby uruchomić projekt na nowym komputerze, wykonaj poniższe komendy w terminal
    ```
    git clone https://github.com/PGrzebien/Autobus-Podmiejski.git
    cd Autobus-Podmiejski
-```
+
 ### Instrukcja Kompilacji (Krok po kroku)
 
-1.  **Kompilacja projektu:**
-    ```
-    make
-    ```
-    *(Zostaną wygenerowane 4 pliki wykonywalne: system, autobus, pasazer, kasa)*
+1. **Kompilacja projektu:**
+   ```
+   make
+   
+2. **Uruchomienie symulacji:**
+   ```
+   ./system
 
-2.  **Uruchomienie symulacji:**
-    ```
-    ./system
-    ```
+3. **Czyszczenie (usuwanie plików binarnych i logów):**
+   ```
+   make clean
 
-3.  **Czyszczenie (usuwanie plików binarnych i logów):**
-    ```
-    make clean
-    ```
+## 🎮 Sterowanie (Panel Dyspozytora)
+Po uruchomieniu głównego procesu, masz do dyspozycji interaktywne menu:**
 
-### 🎮 Sterowanie (Panel Dyspozytora)
-Po uruchomieniu głównego procesu, masz do dyspozycji interaktywne menu:
+**[ 1 ] — Wymuszony odjazd Wysyła sygnał SIGUSR1 do autobusu aktualnie stojącego na peronie.**
 
-* `1` - **Wymuszony odjazd:** Wysyła sygnał `SIGUSR1` do autobusu aktualnie stojącego na peronie.
-* `2` - **Blokada stacji:** Zmienia flagę w pamięci współdzielonej, uniemożliwiając pasażerom wejście na dworzec.
-* `q` - **Zakończenie:** Bezpiecznie zamyka wszystkie procesy i czyści struktury IPC.
+**[ 2 ] — Blokada stacji Wysyła sygnał SIGUSR2 lub zmienia flagę w SHM, blokując wstęp na dworzec.**
 
+**[ q ] — Zakończenie Wysyła sygnał SIGINT, bezpiecznie zamyka procesy i czyści struktury IPC.**
 
+```markdown
 ## 🧪 Scenariusze Testowe
 System został poddany weryfikacji w oparciu o kluczowe scenariusze brzegowe i synchronizacyjne:
 
@@ -79,7 +80,7 @@ System został poddany weryfikacji w oparciu o kluczowe scenariusze brzegowe i s
 
 ## 📂 Struktura Projektu
 
-``` 
+```text
 .
 ├── .gitignore              # Plik wykluczający pliki binarne z repozytorium
 ├── Makefile                # Skrypt automatyzacji kompilacji
@@ -94,4 +95,4 @@ System został poddany weryfikacji w oparciu o kluczowe scenariusze brzegowe i s
     ├── main.cpp            # Punkt wejścia (Generator, Dyspozytor)
     ├── passenger.cpp       # Implementacja logiki Pasażera
     └── utils.cpp           # Implementacja narzędzi i obsługi błędów
-
+   
