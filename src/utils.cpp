@@ -21,7 +21,10 @@ void semaphore_p(int semid, int sem_num) {
     sb.sem_num = sem_num;
     sb.sem_op = -1;      // Zmniejsz wartość o 1 (czekaj jeśli 0)
     sb.sem_flg = SEM_UNDO; // Bezpieczeństwo: zwolnij przy crashu
-    check_error(semop(semid, &sb, 1), "semaphore_p");
+    while (semop(semid, &sb, 1) == -1) {
+       if (errno == EINTR) continue;
+       check_error(-1, "semaphore_p");
+    }
 }
 
 // Funkcja V - podniesienie semafora
@@ -30,7 +33,10 @@ void semaphore_v(int semid, int sem_num) {
     sb.sem_num = sem_num;
     sb.sem_op = 1;       // Zwiększ wartość o 1
     sb.sem_flg = SEM_UNDO;
-    check_error(semop(semid, &sb, 1), "semaphore_v");
+    while (semop(semid, &sb, 1) == -1) {
+        if (errno == EINTR) continue;
+        check_error(-1, "semaphore_v");
+    }
 }
 // Funkcja logująca - pisze jednocześnie na ekran i do pliku.
 void log_action(const char* format, ...) {
