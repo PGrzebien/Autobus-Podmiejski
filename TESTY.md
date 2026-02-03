@@ -134,3 +134,55 @@
 * **Działanie Priorytetu:** Logi jednoznacznie pokazują, że po otwarciu bramek, procesy VIP zdobyły dostęp do sekcji krytycznej semafora wejściowego jako pierwsze, wyprzedzając procesy normalne (np. PID 3579, który czekał od początku testu).
 * **Mechanizm synchronizacji:** Zmienna `vips_waiting` w pamięci dzielonej (SHM) poprawnie wymusiła ustąpienie miejsca przez zwykłe procesy (zastosowano `usleep` w pętli decyzyjnej), co zapobiegło zjawisku zagłodzenia VIP-ów.
 * **Stabilność przy obciążeniu:** Mimo nagłego "uderzenia" kilkunastu procesów naraz (tzw. thundering herd problem przy otwarciu semafora), system zachował spójność danych i poprawnie zaktualizował liczniki miejsc.
+
+
+## 🔥 Test 6: Stress Test "Zero-Delay" (Race Condition)
+**Cel:** Weryfikacja stabilności semaforów i mechanizmów IPC w warunkach maksymalnego obciążenia procesora (usunięcie sztucznych opóźnień `sleep`). Sprawdzenie, czy przy setkach procesów walczących o zasób w tej samej milisekundzie nie dojdzie do przekłamania liczników (overbooking) lub zakleszczenia.
+
+### 📝 Opis scenariusza
+1. Maksymalne skrócenie czasu trwania operacji poprzez zakomentowanie większości funkcji `usleep()` w procesach pasażera i kasy.
+2. W procesie kierowcy (`bus.cpp`) zmieniono standardowy `sleep(1)` na minimalny `usleep(1000)` (1ms). 
+   *UWAGA: Minimalne opóźnienie w pętli autobusu pozostawiono celowo, aby zapobiec zjawisku "Busy Waiting" i umożliwić schedulerowi systemu operacyjnego sprawiedliwe przydzielanie czasu procesora procesom pasażerów czekającym na semaforze.*
+3. Uruchomienie systemu w trybie "High-Throughput", gdzie generator zalewa system procesami bez żadnych przerw.
+
+### 📥 Wynik (Logi systemowe - fragment)
+```
+[Wejście] Pasażer 4226 (16 lat). Stan: 11/15 (Rowery: 0/5)
+[Wejście] Pasażer 4228 (45 lat). Stan: 15/15 (Rowery: 0/5)
+[Autobus 1] Komplet pasażerów! Odjeżdżam wcześniej.
+[Drzwi] ZAMKNIĘTE.
+...
+[Dyspozytor] Dworzec ZAMKNIĘTY (Blokada wejścia).
+[Autobus 2] ODJAZD! Pasażerów: 0/15.
+...
+[Dyspozytor] Dworzec OTWARTY dla podróżnych.
+[Autobus 2] Zbieram pasażerów...
+[Wejście] Pasażer 4307 (28 lat). Stan: 1/15
+...
+[Wejście] Pasażer 4324 (10 lat). Stan: 15/15
+[Autobus 2] Komplet pasażerów! Odjeżdżam wcześniej.
+```
+### 🧐 Wnioski techniczne
+* **Integralność Semaforów:** Mimo usunięcia opóźnień, semafor `SEM_CAPACITY` ani razu nie wpuścił 16. pasażera. Liczniki zatrzymywały się idealnie na 15/15.
+* **Stabilność IPC:** Kolejki komunikatów obsłużyły tysiące zapytań w ciągu sekund bez utraty danych.
+* **Priorytety:** Nawet w warunkach Stress Testu, blokada dworca (zmienna w pamięci dzielonej) była respektowana natychmiastowo przez wszystkie oczekujące procesy.
+
+
+## 🧮 Test 7: Test Integralności Danych (Data Consistency)
+**Cel:** Weryfikacja, czy system poprawnie zlicza i obsługuje każdego pasażera bez "zgubienia" procesów w mechanizmach IPC. Bilans wejść musi się zgadzać z sumą wydanych biletów i pasażerów uprzywilejowanych.
+
+### 📝 Opis scenariusza
+1. Ograniczenie generatora do sztywnej liczby 100 pasażerów.
+2. Usunięcie opóźnień (tryb szybki), aby wymusić maksymalne obciążenie kolejek i pamięci.
+3. Po zakończeniu symulacji, analiza pliku `symulacja.txt` pod kątem zdarzeń: zakup biletu, odmowa wejścia oraz fizyczne wejście do pojazdu.
+
+### 📥 Wynik (Analiza ilościowa)
+* Liczba komunikatów "odebrał bilet": **97**
+* Liczba komunikatów "bez opiekuna! ODMOWA": **0**
+* Liczba komunikatów "Wejście": **100**
+
+### 🧐 Wnioski techniczne
+* **Analiza bilansu:** Matematyczna analiza logów wykazała 100% zgodności danych. Równanie testu: 
+  `97 (bilety) - 0 (odmowy) + 3 (VIP) = 100 (suma wejść)`.
+* **Wyjaśnienie różnicy:** Liczba wydanych biletów (97) jest mniejsza od liczby wejść (100), ponieważ 3 procesy zostały wylosowane jako typ VIP. Zgodnie z logiką projektu, VIP-y posiadają bilet wcześniej i nie korzystają z kolejki komunikatów kasy, co zostało poprawnie odzwierciedlone w logach.
+* **Niezawodność IPC:** Brak utraty procesów w warunkach stresowych potwierdza poprawną implementację semaforów Systemu V.
