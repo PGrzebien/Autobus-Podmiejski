@@ -8,6 +8,7 @@
 #include <sys/sem.h>
 #include <sys/msg.h>
 #include <pthread.h>
+#include <sched.h>  // <--- WAŻNE: Potrzebne do sched_yield()
 #include "../include/common.h"
 #include "../include/utils.h"
 
@@ -34,20 +35,16 @@ void init_resources() {
 
     msgid = msgget(MSG_KEY, 0666);
     if (msgid == -1) {
-        perror("[Pasażer] Błąd msgget - Kasa nie działa!");
+        perror("[Pasażer] Błąd msgget");
         exit(1);
     }
 }
 
-// --- FUNKCJA WĄTKU (DZIECKO) ---
 void* child_thread_behavior(void* arg) {
-    // Ten wątek reprezentuje dziecko wewnątrz procesu rodzica.
-    // Nie walczy o zasoby (robi to Rodzic), po prostu "jest" w autobusie.
     return NULL; 
 }
 
 void board_bus(PassengerType type, pid_t pid, int age) {
-    // 1. Walidacja wieku (Dziecko < 8 lat)
     if (age < 8) {
         if (rand() % 100 < 10) {
             log_action(C_BOLD C_RED "[Kontrola] Dziecko (%d lat, PID: %d) bez opiekuna! ODMOWA." C_RESET, age, pid);
@@ -55,7 +52,6 @@ void board_bus(PassengerType type, pid_t pid, int age) {
         }
     }
 
-    // 2. Bilet
     if (type == VIP) {
         log_action(C_BOLD C_MAGENTA "[Pasażer %d] VIP (%d lat) - mam bilet, wchodzę BEZ KOLEJKI." C_RESET, pid, age);
     } else {
@@ -64,124 +60,83 @@ void board_bus(PassengerType type, pid_t pid, int age) {
         msg.passenger_pid = pid;
         msg.age = age;
 
-        // Wyślij zapytanie do Kasy
-        if (msgsnd(msgid, &msg, MSG_SIZE, 0) == -1) {
-            perror("Błąd msgsnd (zakup)");
-            return;
-        }
-
-        // Czekaj na odpowiedź (Blokada procesu)
-        if (msgrcv(msgid, &msg, MSG_SIZE, pid, 0) == -1) {
-            perror("Błąd msgrcv (odbiór biletu)");
-            return;
-        }
-
+        if (msgsnd(msgid, &msg, MSG_SIZE, 0) == -1) return;
+        if (msgrcv(msgid, &msg, MSG_SIZE, pid, 0) == -1) return;
+        
         log_action("[Kasa] Pasażer %d (%d lat) odebrał bilet.", pid, age);
     }
     
-    // --- REJESTRACJA VIP ---
     if (type == VIP) {
         semaphore_p(semid, SEM_MUTEX);
         bus->vips_waiting++;
         semaphore_v(semid, SEM_MUTEX);
     }
 
-    // Pętla oczekiwania na autobus (Kolejka) ---
     bool boarded = false;
 
     while (!boarded) {
-        // 3. Dworzec - sprawdzamy czy otwarty
-        semaphore_p(semid, SEM_MUTEX);
-        if (!bus->is_station_open) {
-            semaphore_v(semid, SEM_MUTEX);
-            // Zamiast exit(0) -> czekamy przed wejściem
-            sleep(1);
-            continue;
-        }
-        semaphore_v(semid, SEM_MUTEX);
-
-        // --- USTĘPOWANIE VIP-om ---
-        if (type != VIP) {
-            semaphore_p(semid, SEM_MUTEX);
-            int waiting = bus->vips_waiting;
-            semaphore_v(semid, SEM_MUTEX);
-
-            if (waiting > 0) {
-                usleep(200000); // 0.2s czekania
-                continue;       // Wracam na początek, nie biorę semafora drzwi
-            }
-        }
-
-        // 4. Drzwi
+        // 1. CZEKAMY NA DRZWI (Blokada systemowa - proces śpi)
         int door_sem = (type == BIKER) ? SEM_DOOR_2 : SEM_DOOR_1;
-        semaphore_p(semid, door_sem);
+        struct sembuf sb = {(unsigned short)door_sem, -1, 0};
+        
+        if (semop(semid, &sb, 1) == -1) {
+            if (errno == EINTR) continue;
+            return;
+        }
+         
+        usleep(1);
 
-        // 5. Wsiadanie
+        // 2. MUTEX
         semaphore_p(semid, SEM_MUTEX);
         
+        // A. Sprawdzamy czy autobus nie odjechał / dworzec otwarty
+        if (bus->is_at_station == 0 || !bus->is_station_open) {
+            semaphore_v(semid, SEM_MUTEX);
+            // Jak dworzec zamknięty, to mały oddech żeby nie spalić CPU
+            if (!bus->is_station_open) usleep(100000); 
+            continue; 
+        }
+
+        if (type != VIP && bus->vips_waiting > 0) {
+            semaphore_v(semid, SEM_MUTEX);
+            struct sembuf v_door = {(unsigned short)door_sem, 1, 0};
+            semop(semid, &v_door, 1);
+            continue;
+        }
+
         bool can_enter = true;
-        int seats_needed = 1;
+        int seats_needed = (age < 8) ? 2 : 1;
 
-        // --- LOGIKA MIEJSC ---
-        if (age < 8) {
-            seats_needed = 2; // Dziecko + Opiekun
-        }
-
-        // Sprawdzanie limitów
-        if (bus->current_passengers + seats_needed > P_CAPACITY) {
-            can_enter = false; 
-        } 
-        else if (type == BIKER && bus->current_bikes >= R_BIKES) {
-            can_enter = false;
-        }
+        if (bus->current_passengers + seats_needed > P_CAPACITY) can_enter = false;
+        else if (type == BIKER && bus->current_bikes >= R_BIKES) can_enter = false;
 
         if (can_enter) {
             bus->current_passengers += seats_needed;
             if (type == BIKER) bus->current_bikes++;
             
-            // --- WĄTEK DZIECKA ---
             if (age < 8) {
                 pthread_t child_tid;
-                // Tworzymy wątek dziecka, które "siada" na zajętym przez rodzica miejscu
                 if (pthread_create(&child_tid, NULL, child_thread_behavior, NULL) == 0) {
-                    pthread_join(child_tid, NULL); // Rodzic upewnia się, że dziecko usiadło
+                    pthread_join(child_tid, NULL);
                 }
             }
-           
-    
-            // --- VIP WSIADŁ ---
-            if (type == VIP) {
-                bus->vips_waiting--;
-            }
+            
+            if (type == VIP) bus->vips_waiting--;
 
-            usleep(10000);
-      
-            // LOGOWANIE ZALEŻNE OD TYPU
+            // SZYBKIE WEJŚCIE (Bez sleepa)
             if (age < 8) {
-                log_action(C_BOLD C_GREEN "[Wejście] " C_CYAN "DZIECKO + OPIEKUN (PID: %d, %d lat)" C_GREEN ". Stan: %d/%d" C_RESET, 
-                       pid, age, bus->current_passengers, P_CAPACITY);
-            } 
-            else if (type == BIKER) {
-                log_action(C_BOLD C_GREEN "[Wejście] " C_BLUE "ROWERZYSTA (PID: %d, %d lat)" C_GREEN ". Stan: %d/%d (Rowery: %d/%d)" C_RESET, 
-                       pid, age, bus->current_passengers, P_CAPACITY, bus->current_bikes, R_BIKES);
+                log_action(C_BOLD C_GREEN "[Wejście] DZIECKO + OPIEKUN (PID: %d). Stan: %d/%d" C_RESET, pid, bus->current_passengers, P_CAPACITY);
+            } else {
+                log_action(C_BOLD C_GREEN "[Wejście] Pasażer %d (%d lat). Stan: %d/%d" C_RESET, pid, age, bus->current_passengers, P_CAPACITY);
             }
-            else {
-                log_action(C_BOLD C_GREEN "[Wejście] Pasażer %d (%d lat). Stan: %d/%d (Rowery: %d/%d)" C_RESET, 
-                       pid, age, bus->current_passengers, P_CAPACITY, bus->current_bikes, R_BIKES);
-            }
-            boarded = true; // Sukces - przerywamy pętlę
+            boarded = true; 
         } 
         else {
-            // Ważne: Zwalniamy semafor drzwi, żeby nie blokować!
-            semaphore_v(semid, door_sem);
+            struct sembuf v_door = {(unsigned short)door_sem, 1, 0};
+            semop(semid, &v_door, 1);
         }
 
         semaphore_v(semid, SEM_MUTEX);
-        
-        if (!boarded) {
-            // Czekamy na następny kurs
-            usleep(200000); 
-        }
     }
 }
 
@@ -203,7 +158,7 @@ int main(int argc, char* argv[]) {
 
     board_bus(type, my_pid, age);
 
-    semaphore_v(semid, SEM_LIMIT); // Zwalniam miejsce w systemie (V)
+    semaphore_v(semid, SEM_LIMIT); 
 
     shmdt(bus);
     return 0;
