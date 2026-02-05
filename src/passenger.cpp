@@ -65,14 +65,16 @@ bool board_bus(PassengerType type, pid_t pid, int age) {
         // Wysyłamy i czekamy na odpowiedź
         if (msgsnd(msgid, &msg, MSG_SIZE, 0) == -1) return false;
         if (msgrcv(msgid, &msg, MSG_SIZE, pid, 0) == -1) return false;
+        
         //========= LOGI KASY============================
-        log_action("[Kasa] Pasażer %d (%d lat) odebrał bilet.", pid, age);
+        //log_action("[Kasa] Pasażer %d (%d lat) odebrał bilet.", pid, age);
     }
     
     bool boarded = false;
 
     // 3. Pętla wsiadania
     while (!boarded) {
+
         // A. Czekamy na odpowiednie drzwi
         int door_sem = (type == BIKER) ? SEM_DOOR_2 : SEM_DOOR_1;
         struct sembuf sb = {(unsigned short)door_sem, -1, 0};
@@ -82,13 +84,14 @@ bool board_bus(PassengerType type, pid_t pid, int age) {
             return false;
         }
           
-        // B. Wchodzimy do sekcji krytycznej (szybko)
+        // B. Wchodzimy do sekcji krytycznej
         semaphore_p(semid, SEM_MUTEX);
         
         // Sprawdzamy czy autobus nie uciekł albo czy dworzec otwarty
         if (bus->is_at_station == 0 || !bus->is_station_open) {
             semaphore_v(semid, SEM_MUTEX);
-            if (!bus->is_station_open) usleep(100000); 
+            // Jeśli zamknięte, czekamy chwilę żeby nie spamować
+            if (!bus->is_station_open) usleep(200000); 
             continue; 
         }
 
@@ -107,12 +110,10 @@ bool board_bus(PassengerType type, pid_t pid, int age) {
         else if (type == BIKER && bus->current_bikes >= R_BIKES) can_enter = false;
 
         if (can_enter) {
-
-
             // =================================================================
-            // TU JEST WAJCHA PRĘDKOŚCI!
-            usleep(50000);
-            // =======================
+            // WAJCHA PRĘDKOŚC
+            usleep(50000); 
+            // =================================================================
 
             // WSIADAMY!
             bus->current_passengers += seats_needed;
@@ -149,6 +150,7 @@ bool board_bus(PassengerType type, pid_t pid, int age) {
             semop(semid, &v_door, 1);
         }
 
+        // Zwalniamy zasoby
         semaphore_v(semid, SEM_MUTEX);
     }
     return true; // Sukces
@@ -186,10 +188,9 @@ int main(int argc, char* argv[]) {
         while (bus->is_at_station == 1 && bus->bus_at_station_pid == bus_pid) {
             usleep(100000);
         }
-        log_action("[Pasażer %d] Dojechałem do celu, wysiadam.", my_pid);
+        //log_action("[Pasażer %d] Dojechałem do celu, wysiadam.", my_pid);
     }
 
     shmdt(bus);
     return 0;
-
 }
