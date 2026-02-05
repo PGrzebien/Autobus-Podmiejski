@@ -8,7 +8,7 @@
 #include <sys/sem.h>
 #include <sys/msg.h>
 #include <pthread.h>
-#include <sched.h>  // <--- WAŻNE: Potrzebne do sched_yield()
+#include <sched.h> 
 #include "../include/common.h"
 #include "../include/utils.h"
 
@@ -29,14 +29,10 @@ void init_resources() {
     shmid = shmget(SHM_KEY, sizeof(BusState), 0666);
     check_error(shmid, "[Pasażer] Błąd shmget");
     bus = (BusState*)shmat(shmid, NULL, 0);
-    check_error(bus == (void*)-1 ? -1 : 0, "[Pasażer] Błąd shmat");
     semid = semget(SEM_KEY, 5, 0666);
-    check_error(semid, "[Pasażer] Błąd semget");
-
     msgid = msgget(MSG_KEY, 0666);
-    if (msgid == -1) {
-        perror("[Pasażer] Błąd msgget");
-        exit(1);
+    if (msgid == -1) { 
+        exit(1); 
     }
 }
 
@@ -44,59 +40,59 @@ void* child_thread_behavior(void* arg) {
     return NULL; 
 }
 
-void board_bus(PassengerType type, pid_t pid, int age) {
+// Zmiana typu na bool: zwraca true, jeśli udało się wsiąść
+bool board_bus(PassengerType type, pid_t pid, int age) {
+    // 1. Walidacja wieku
     if (age < 8) {
         if (rand() % 100 < 10) {
             log_action(C_BOLD C_RED "[Kontrola] Dziecko (%d lat, PID: %d) bez opiekuna! ODMOWA." C_RESET, age, pid);
-            return;
+            return false;
         }
     }
 
+    // 2. Kasa / Bilet
     if (type == VIP) {
         log_action(C_BOLD C_MAGENTA "[Pasażer %d] VIP (%d lat) - mam bilet, wchodzę BEZ KOLEJKI." C_RESET, pid, age);
+        semaphore_p(semid, SEM_MUTEX);
+        bus->vips_waiting++;
+        semaphore_v(semid, SEM_MUTEX);
     } else {
         TicketMsg msg;
         msg.mtype = MSG_TYPE_REQ;
         msg.passenger_pid = pid;
         msg.age = age;
 
-        if (msgsnd(msgid, &msg, MSG_SIZE, 0) == -1) return;
-        if (msgrcv(msgid, &msg, MSG_SIZE, pid, 0) == -1) return;
-        
+        // Wysyłamy i czekamy na odpowiedź
+        if (msgsnd(msgid, &msg, MSG_SIZE, 0) == -1) return false;
+        if (msgrcv(msgid, &msg, MSG_SIZE, pid, 0) == -1) return false;
+        //========= LOGI KASY============================
         log_action("[Kasa] Pasażer %d (%d lat) odebrał bilet.", pid, age);
     }
     
-    if (type == VIP) {
-        semaphore_p(semid, SEM_MUTEX);
-        bus->vips_waiting++;
-        semaphore_v(semid, SEM_MUTEX);
-    }
-
     bool boarded = false;
 
+    // 3. Pętla wsiadania
     while (!boarded) {
-        // 1. CZEKAMY NA DRZWI (Blokada systemowa - proces śpi)
+        // A. Czekamy na odpowiednie drzwi
         int door_sem = (type == BIKER) ? SEM_DOOR_2 : SEM_DOOR_1;
         struct sembuf sb = {(unsigned short)door_sem, -1, 0};
         
         if (semop(semid, &sb, 1) == -1) {
             if (errno == EINTR) continue;
-            return;
+            return false;
         }
-         
-        usleep(1);
-
-        // 2. MUTEX
+          
+        // B. Wchodzimy do sekcji krytycznej (szybko)
         semaphore_p(semid, SEM_MUTEX);
         
-        // A. Sprawdzamy czy autobus nie odjechał / dworzec otwarty
+        // Sprawdzamy czy autobus nie uciekł albo czy dworzec otwarty
         if (bus->is_at_station == 0 || !bus->is_station_open) {
             semaphore_v(semid, SEM_MUTEX);
-            // Jak dworzec zamknięty, to mały oddech żeby nie spalić CPU
             if (!bus->is_station_open) usleep(100000); 
             continue; 
         }
 
+        // Ustępowanie VIP-om
         if (type != VIP && bus->vips_waiting > 0) {
             semaphore_v(semid, SEM_MUTEX);
             struct sembuf v_door = {(unsigned short)door_sem, 1, 0};
@@ -111,6 +107,14 @@ void board_bus(PassengerType type, pid_t pid, int age) {
         else if (type == BIKER && bus->current_bikes >= R_BIKES) can_enter = false;
 
         if (can_enter) {
+
+
+            // =================================================================
+            // TU JEST WAJCHA PRĘDKOŚCI!
+            usleep(50000);
+            // =======================
+
+            // WSIADAMY!
             bus->current_passengers += seats_needed;
             if (type == BIKER) bus->current_bikes++;
             
@@ -123,21 +127,31 @@ void board_bus(PassengerType type, pid_t pid, int age) {
             
             if (type == VIP) bus->vips_waiting--;
 
-            // SZYBKIE WEJŚCIE (Bez sleepa)
+            // Logowanie
             if (age < 8) {
-                log_action(C_BOLD C_GREEN "[Wejście] DZIECKO + OPIEKUN (PID: %d). Stan: %d/%d" C_RESET, pid, bus->current_passengers, P_CAPACITY);
-            } else {
+                log_action(C_BOLD C_GREEN "[Wejście] " C_CYAN "DZIECKO + OPIEKUN (PID: %d, %d lat)" C_GREEN ". Stan: %d/%d" C_RESET, pid, age, bus->current_passengers, P_CAPACITY);
+            } 
+            else if (type == BIKER) {
+                 log_action(C_BOLD C_GREEN "[Wejście] " C_BLUE "ROWERZYSTA (PID: %d)" C_GREEN ". Stan: %d/%d (Rowery: %d/%d)" C_RESET, pid, bus->current_passengers, P_CAPACITY, bus->current_bikes, R_BIKES);
+            }
+            else if (type == VIP) {
+                 log_action(C_BOLD C_MAGENTA "[Wejście] VIP (PID: %d). Stan: %d/%d" C_RESET, pid, bus->current_passengers, P_CAPACITY);
+            }
+            else {
                 log_action(C_BOLD C_GREEN "[Wejście] Pasażer %d (%d lat). Stan: %d/%d" C_RESET, pid, age, bus->current_passengers, P_CAPACITY);
             }
+
             boarded = true; 
         } 
         else {
+            // Nie zmieścił się - oddaje drzwi
             struct sembuf v_door = {(unsigned short)door_sem, 1, 0};
             semop(semid, &v_door, 1);
         }
 
         semaphore_v(semid, SEM_MUTEX);
     }
+    return true; // Sukces
 }
 
 int main(int argc, char* argv[]) {
@@ -156,9 +170,19 @@ int main(int argc, char* argv[]) {
         age = 8 + (rand() % 75); 
     }
 
-    board_bus(type, my_pid, age);
+    // Próba wejścia
+    bool success = board_bus(type, my_pid, age);
 
+    // Po wejściu (lub odrzuceniu) zwalniamy semafor limitu systemowego
     semaphore_v(semid, SEM_LIMIT); 
+
+    // Jeśli udało się wsiąść, pasażer NIE KOŃCZY działania.
+    // Czeka w środku, dopóki autobus nie odjedzie (is_at_station == 0).
+    if (success) {
+        while (bus->is_at_station == 1) {
+            usleep(100000); // Czekaj 0.1s i sprawdzaj czy jedziemy
+        }
+    }
 
     shmdt(bus);
     return 0;

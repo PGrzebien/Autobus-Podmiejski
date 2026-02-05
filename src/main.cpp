@@ -38,25 +38,23 @@ pid_t kasa_pid = 0;
 // Funkcja sprzątająca (SIGINT)
 void cleanup(int sig) {
     printf("\n" C_BOLD C_RED "=========================================" C_RESET "\n");
-    printf(C_BOLD C_RED "[System] OTRZYMANO SYGNAŁ ZAMKNIĘCIA!" C_RESET "\n");
+    printf(C_BOLD C_RED "[System] OTRZYMANO SYGNAŁ ZAMKNIĘCIA! Sprzątam..." C_RESET "\n");
     
-    // Zabijanie całej floty autobusów
-    for (int i = 0; i < N_BUSES; i++) {
-        if (bus_pids[i] > 0) kill(bus_pids[i], SIGTERM);
-    }
-    
-    if (gen_pid > 0) kill(gen_pid, SIGTERM);
-    if (kasa_pid > 0) kill(kasa_pid, SIGTERM);
-
+    // 1. Najpierw usuwamy IPC (Zanim zabijemy siebie samych!)
+    // Dzięki temu nie zostaną śmieci w pamięci, nawet jak zginiemy.
     if (shmctl(shmid, IPC_RMID, NULL) == -1) perror("Błąd usuwania SHM");
     if (semctl(semid, 0, IPC_RMID) == -1) perror("Błąd usuwania SEM");
     if (msgctl(msgid, IPC_RMID, NULL) == -1) perror("Błąd usuwania MSG");
-    
-    printf(C_RED "[System] Zasoby wyczyszczone. Do widzenia." C_RESET "\n");
+
+    printf(C_RED "[System] IPC wyczyszczone. Teraz zabijam wszystkich..." C_RESET "\n");
     printf(C_BOLD C_RED "=========================================" C_RESET "\n");
+
+    // 2. Zabij CAŁĄ grupę procesów (siebie, pasażerów, autobusy)
+    // SIGKILL nie da się zignorować. To czyści planszę do zera.
+    kill(0, SIGKILL);
+    
     exit(0);
 }
-
 void validate_parameters() {
     if (R_BIKES > P_CAPACITY) {
         fprintf(stderr, C_BOLD C_RED "BŁĄD KRYTYCZNY: Liczba rowerów (%d) > Miejsc (%d)!\n" C_RESET, R_BIKES, P_CAPACITY);
@@ -71,7 +69,7 @@ void run_generator() {
     signal(SIGCHLD, SIG_IGN); 
 
     int i = 0;
-    while (i < 500) {
+    while (i < 1000) {
         usleep((rand() % 1000 + 500) * 1000); 
 
         int r = rand() % 100;
@@ -157,7 +155,7 @@ int main() {
     arg.val = 1; semctl(semid, SEM_PLATFORM, SETVAL, arg); 
     arg.val = 0; semctl(semid, SEM_DOOR_1, SETVAL, arg); 
                  semctl(semid, SEM_DOOR_2, SETVAL, arg);     
-    arg.val = 200; // Limit: max 200 pasażerów w systemie naraz
+    arg.val = 6000; // Limit: max 200 pasażerów w systemie naraz
     semctl(semid, SEM_LIMIT, SETVAL, arg);
 
     msgid = msgget(MSG_KEY, IPC_CREAT | 0666);

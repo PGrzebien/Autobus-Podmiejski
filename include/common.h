@@ -15,7 +15,7 @@
 #define SEM_LIMIT    4
 // --- KONFIGURACJA ---
 #define N_BUSES 3
-#define P_CAPACITY 15
+#define P_CAPACITY 500
 #define R_BIKES 5
 #define T_WAIT 10
 #define LOG_FILE "symulacja.txt"
