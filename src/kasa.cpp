@@ -36,7 +36,7 @@ int main() {
 
         // 3. Obsługa klienta (Symulacja czasu pracy)
         // Kasa obsługuje szybko (np. 10ms), ale przy 5000 osób zrobi się zator!
-        usleep(10000);
+        //usleep(10000);
 
         // Logowanie (opcjonalne, żeby nie zamulić terminala przy 5000)
         // log_action("[Kasa] Sprzedano bilet dla PID: %d", msg.passenger_pid);

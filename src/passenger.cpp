@@ -111,8 +111,8 @@ bool board_bus(PassengerType type, pid_t pid, int age) {
 
         if (can_enter) {
             // =================================================================
-            // WAJCHA PRĘDKOŚC
-            usleep(50000); 
+            // WAJCHA PRĘDKOŚCI 
+            //usleep(50000); 
             // =================================================================
 
             // WSIADAMY!
@@ -190,6 +190,13 @@ int main(int argc, char* argv[]) {
         }
         //log_action("[Pasażer %d] Dojechałem do celu, wysiadam.", my_pid);
     }
+
+    // =========================================================
+    // Odchodzę z systemu, więc zmniejszam licznik!
+    // =========================================================
+    semaphore_p(semid, SEM_MUTEX);
+    bus->active_passengers--;
+    semaphore_v(semid, SEM_MUTEX);
 
     shmdt(bus);
     return 0;

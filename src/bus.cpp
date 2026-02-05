@@ -32,12 +32,13 @@ void init_resources() {
 }
 
 void handle_signal(int sig) {
+    // Jeśli dostaniemy SIGUSR1 (od Dyspozytora '1'), ustawiamy flagę
     if (sig == SIGUSR1 && bus != nullptr && bus->is_at_station) {
         force_departure = 1;
     }
 }
 
-// Funkcja techniczna - tylko ustawia semafory (bez logowania)
+// Funkcja techniczna - tylko ustawia semafory
 void set_doors(int open) {
     union semun arg;
     // Drzwi 1: Pojemność
@@ -74,6 +75,7 @@ int main(int argc, char* argv[]) {
                 bus->bus_at_station_pid = getpid();
                 bus->current_passengers = 0;
                 bus->current_bikes = 0;
+                bus->force_departure_signal = 0; // Reset flagi sygnału
                 entered = true;
             }
             semaphore_v(semid, SEM_MUTEX);
@@ -86,55 +88,41 @@ int main(int argc, char* argv[]) {
         }
 
         log_action(C_BOLD C_YELLOW "[Autobus %d] >>> PODSTAWIONO NA PERON <<<" C_RESET, bus_num);
-        log_action("[Autobus %d] Zbieram pasażerów...", bus_num);
+        log_action("[Autobus %d] Zbieram pasażerów... (Postój: %ds)", bus_num, T_WAIT);
 
         // Zmienna lokalna do pilnowania logów drzwi
         int local_last_state = -1; 
         
-        // Pętla oczekiwania
+        // Pętla oczekiwania - T_WAIT sekund
         int max_checks = T_WAIT * 10;
         
-        // 2. PĘTLA OCZEKIWANIA (SUPER-SZYBKA REAKCJA - IPC_NOWAIT)
         for (int i = 0; i < max_checks; i++) {
             
-            // A. Sygnał ODJAZDU (Priorytet najwyższy - sprawdzamy ZAWSZE)
+            // A. Sygnał ODJAZD
             if (force_departure) {
                 log_action(C_BOLD C_MAGENTA "[Autobus %d] >>> WYMUSZONO ODJAZD! <<<" C_RESET, bus_num);
                 force_departure = 0;
-                break; 
+                break; // Przerywamy czekanie i odjeżdżamy natychmiast
             }
 
-            // B. Obsługa DRZWI (Priorytet wysoki - sprawdzamy ZAWSZE)
+            // B. Obsługa DRZWI (Priorytet wysoki)
             int current_state = bus->is_station_open;
             set_doors(current_state);
 
-            // Logujemy tylko zmianę stanu
             if (current_state != local_last_state) {
                 if (current_state) log_action(C_BOLD C_GREEN "[Drzwi] OTWARTE." C_RESET);
                 else log_action(C_BOLD C_RED "[Drzwi] ZAMKNIĘTE." C_RESET);
                 local_last_state = current_state;
             }
 
-            // C. Sprawdzanie POJEMNOŚCI (Wersja NON-BLOCKING)
-            // Używamy IPC_NOWAIT, żeby autobus nie utknął w kolejce 5000 pasażerów
+            // IPC_NOWAIT zapobiega blokowaniu procesu w kolejce pasażerów.
             struct sembuf sb_check = {(unsigned short)SEM_MUTEX, -1, IPC_NOWAIT};
             
-            // Próbujemy wziąć semafor bez czekania
             if (semop(semid, &sb_check, 1) == 0) {
-                // Udało się! Mamy dostęp do pamięci (nikt nie wchodzi w tej nanosekundzie)
-                bool is_full = (bus->current_passengers >= P_CAPACITY);
-                semaphore_v(semid, SEM_MUTEX); // Zwalniamy normalnie
-
-                if (is_full) {
-                    log_action(C_BOLD C_GREEN "[Autobus %d] Komplet! Odjeżdżam." C_RESET, bus_num);
-                    break;
-                }
+                semaphore_v(semid, SEM_MUTEX);
             }
-            // Jeśli semop zwrócił -1 (zajęte przez pasażera), to TRUDNO.
-            // Ignorujemy to i lecimy dalej pętlą, żeby sprawdzić sygnał force_departure.
-            // Dzięki temu autobus nigdy się nie zawiesi.
 
-            usleep(100000); // 0.1s przerwy
+            usleep(100000); // 0.1s przerwy (zegar pętli)
         }
 
         // Zamknięcie drzwi i czyszczenie
@@ -147,10 +135,12 @@ int main(int argc, char* argv[]) {
         semaphore_p(semid, SEM_MUTEX);
         bus->is_at_station = 0;
         bus->bus_at_station_pid = 0;
+        bus->force_departure_signal = 0; // Reset flagi
         log_action("[Autobus %d] ODJAZD! Pasażerów: %d/%d.", bus_num, bus->current_passengers, P_CAPACITY);
         bus->total_travels++;
         semaphore_v(semid, SEM_MUTEX);
 
+        // Zwalniamy peron dla innego autobusu
         struct sembuf v_platform = {SEM_PLATFORM, 1, 0};
         semop(semid, &v_platform, 1);
 
