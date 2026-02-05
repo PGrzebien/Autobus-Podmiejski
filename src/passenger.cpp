@@ -179,11 +179,17 @@ int main(int argc, char* argv[]) {
     // Jeśli udało się wsiąść, pasażer NIE KOŃCZY działania.
     // Czeka w środku, dopóki autobus nie odjedzie (is_at_station == 0).
     if (success) {
-        while (bus->is_at_station == 1) {
-            usleep(100000); // Czekaj 0.1s i sprawdzaj czy jedziemy
+        // Zapamiętujemy PID autobusu, do którego wsiedliśmy
+        pid_t bus_pid = bus->bus_at_station_pid;
+
+        // Czekamy dopóki TEN KONKRETNY autobus jest na stacji
+        while (bus->is_at_station == 1 && bus->bus_at_station_pid == bus_pid) {
+            usleep(100000);
         }
+        log_action("[Pasażer %d] Dojechałem do celu, wysiadam.", my_pid);
     }
 
     shmdt(bus);
     return 0;
+
 }
